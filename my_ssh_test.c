@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <poll.h>
 #include <errno.h>
+#include <stdint.h>
 
 #include "ssh_api.h"
 
@@ -23,18 +24,23 @@ static int create_tcp_listening_socket(uint16_t port);
 
 static int create_tcp_client_socket(char* hostname, char* port);
 
-ssize_t ssh_read(struct ssh* ssh, int in_fd, int out_fd, u_char* type,
-		const u_char** datap, size_t* len);
+ssize_t ssh_read(struct ssh* ssh, u_char* type, const u_char** datap,
+		size_t* len);
 
-ssize_t ssh_write(struct ssh* ssh, int out_fd, u_char type, const u_char* data,
-		size_t len);
+ssize_t ssh_write(struct ssh* ssh, u_char type, const u_char* data, size_t len);
+
+ssize_t ssh_fill(struct ssh* ssh, int in_fd);
 
 ssize_t ssh_flush(struct ssh* ssh, int out_fd);
 
-struct ssh_sender_thread_arg {
-	struct ssh* ssh;
-	int fd;
-};
+ssize_t read_message_from_fd(int fd, u_char* type, u_char* buffer,
+		size_t buffer_len);
+
+ssize_t write_message_to_fd(int fd, u_char type, const u_char* data, size_t len);
+
+ssize_t fd_read_full(int in_fd, u_char* buffer, size_t len);
+
+ssize_t fd_write_full(int out_fd, const u_char* buffer, size_t len);
 
 struct ssh_forwarder_thread_arg {
 	char* ssh_private_key_path;
@@ -44,26 +50,6 @@ struct ssh_forwarder_thread_arg {
 	pthread_barrier_t* barrier;
 };
 
-void* ssh_sender_thread(void* arg) {
-	struct ssh_sender_thread_arg* args = arg;
-	size_t ctr = 0;
-	char data[16] = { 0 };
-	sleep(3);
-
-	while (1) {
-		snprintf(data, sizeof(data), "%zu", ctr++);
-		ssize_t ret = ssh_write(args->ssh, args->fd, 124, data, strlen(data));
-		printf("ssh_write() returned %zd\n", ret);
-		if (ret < 0) {
-			printf("ssh_write() failed\n");
-			exit(1);
-		}
-		sleep(2);
-	}
-
-	return NULL;
-}
-
 void* ssh_forwarder(void* arg) {
 	struct ssh_forwarder_thread_arg* oarg = arg;
 	struct ssh_forwarder_thread_arg args_cpy = { 0 };
@@ -72,7 +58,9 @@ void* ssh_forwarder(void* arg) {
 	memcpy(&args_cpy, oarg, sizeof(args_cpy));
 
 	//finish copying arguments onto own stack and wait until main thread has called pthread_detach()
-	//pthread_barrier_wait(args_cpy.barrier);
+	if (args_cpy.barrier != NULL) {
+		pthread_barrier_wait(args_cpy.barrier);
+	}
 
 	printf("thread ready for %d\n", args_cpy.real_client_fd);
 
@@ -90,6 +78,7 @@ void* ssh_forwarder(void* arg) {
 	if (real_server_fd < 0) {
 		fprintf(stderr, "create_tcp_client_socket() failed\n");
 
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -99,6 +88,7 @@ void* ssh_forwarder(void* arg) {
 	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
 		fprintf(stderr, "signal() error for %d\n", args->real_client_fd);
 
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -106,23 +96,39 @@ void* ssh_forwarder(void* arg) {
 	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
 		fprintf(stderr, "signal() error for %d\n", real_server_fd);
 
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
 		//pthread_exit(NULL);
 		return NULL;
 	}
 
 	/*disable TCP delay*/
-	{
-		int one = 1;
-		int ret = setsockopt(args->real_client_fd, IPPROTO_TCP, TCP_NODELAY,
-				&one, sizeof(one));
-		printf("setsockopt returned %d\n", ret);
+	/*{
+	 int one = 1;
+	 int ret = setsockopt(args->real_client_fd, IPPROTO_TCP, TCP_NODELAY,
+	 &one, sizeof(one));
+	 printf("setsockopt returned %d\n", ret);
 
-		//ret = setsockopt(real_server_fd, IPPROTO_TCP, TCP_NODELAY, &one,
-		//		sizeof(one));
-		//printf("setsockopt returned %d\n", ret);
-	}
+	 ret = setsockopt(real_server_fd, IPPROTO_TCP, TCP_NODELAY, &one,
+	 sizeof(one));
+	 printf("setsockopt returned %d\n", ret);
+	 }*/
+
+	/*{
+	 struct timeval timeout;
+	 timeout.tv_sec = 1;
+	 timeout.tv_usec = 0;
+
+	 int ret = setsockopt(args->real_client_fd, SOL_SOCKET, SO_RCVTIMEO,
+	 &timeout, sizeof(timeout));
+	 printf("setsockopt returned %d\n", ret);
+
+	 ret = setsockopt(real_server_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+	 sizeof(timeout));
+	 printf("setsockopt returned %d\n", ret);
+	 }*/
 
 	/*set sockets to non-blocking*/
 	if (fcntl(args->real_client_fd, F_SETFL, O_NONBLOCK) < 0
@@ -141,7 +147,9 @@ void* ssh_forwarder(void* arg) {
 	if (ret != 0) {
 		printf("ssh_init() failed\n");
 
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -155,7 +163,9 @@ void* ssh_forwarder(void* arg) {
 		printf("key_load_private() failed\n");
 
 		ssh_free(ssh_s);
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -169,7 +179,9 @@ void* ssh_forwarder(void* arg) {
 
 		sshkey_free(sshkey);
 		ssh_free(ssh_s);
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -184,7 +196,9 @@ void* ssh_forwarder(void* arg) {
 		ssh_free(ssh_c);
 		sshkey_free(sshkey);
 		ssh_free(ssh_s);
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -201,7 +215,9 @@ void* ssh_forwarder(void* arg) {
 		ssh_free(ssh_c);
 		sshkey_free(sshkey);
 		ssh_free(ssh_s);
+		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
 		//pthread_exit(NULL);
 		return NULL;
@@ -218,12 +234,15 @@ void* ssh_forwarder(void* arg) {
 		u_char type = 0;
 		const u_char* data = NULL;
 		size_t len = 0;
-		ssize_t ret = 0;
-		ssh_read(ssh_s, ufds[0].fd, ufds[0].fd, &type, &data, &len);
+		//ssize_t ret = 0;
+		ssh_read(ssh_s, &type, &data, &len);
+		ssh_flush(ssh_s, ufds[0].fd);
+		ssh_read(ssh_c, &type, &data, &len);
+		ssh_flush(ssh_c, ufds[1].fd);
 	}
 
 	while (1) {
-		ret = poll(ufds, 2, 1000);
+		ret = poll(ufds, 2, -1);
 
 		if (ret < 0) {
 			fprintf(stderr, "poll() failed\n");
@@ -241,10 +260,10 @@ void* ssh_forwarder(void* arg) {
 			 printf("ssh_flush(ssh_s) returned %zd\n", ret);
 			 } else if (ret < 0) {
 			 printf("ssh_flush(ssh_s) returned %zd\n", ret);
-			 }
+			 }*/
 
-			 //read from in_fd and fill the SSH input byte stream
-			 char buffer[8192];
+			//read from in_fd and fill the SSH input byte stream
+			/*char buffer[8192];
 			 ssize_t sret = read(ufds[1].fd, buffer, sizeof(buffer));
 			 printf("ssh_read: read returned %zd\n", sret);
 			 if (sret > 0) {
@@ -270,99 +289,185 @@ void* ssh_forwarder(void* arg) {
 			printf("poll() returned %d\n", ret);
 
 			if (ufds[0].revents & POLLIN) {
-				printf("real_client_fd ready\n");
+				printf("\n------------------\n");
+
+				printf("Data available from client\n");
 
 				u_char type = 0;
 				const u_char* data = NULL;
 				size_t len = 0;
 				ssize_t ret = 0;
 
-				ret = ssh_read(ssh_s, ufds[0].fd, ufds[0].fd, &type, &data,
-						&len);
-				printf("ssh_read(%d, %d) returned %zd\n", ufds[0].fd,
-						ufds[0].fd, ret);
+				ret = ssh_fill(ssh_s, ufds[0].fd);
+				printf("ssh_fill(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
 				if (ret < 0) {
 					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
-						goto ufds1;
+						printf("ssh_fill() would block\n");
 					} else {
-						printf("ssh_read() failed\n");
+						printf("ssh_fill() failed\n");
 						break;
 					}
 				}
 
-				printf("type: %u, data: %p, len: %zu\n", type, data, len);
-				if (type == 90) {
-					printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
+				u_char should_loop = 1;
+				while (1) {
+					ret = ssh_read(ssh_s, &type, &data, &len);
+					printf(
+							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
+							ret, type, data, len);
+					if (ret < 0) {
+						printf("ssh_read() failed\n");
+						ssh_flush(ssh_s, ufds[0].fd);
+						should_loop = 0;
+						break;
+					}
+					if (type == 90) {
+						printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
+					} else if (type == 0) {
+						printf("\n\nSSH_MSG_NONE\n\n");
+
+						ret = ssh_flush(ssh_s, ufds[0].fd);
+						printf("ssh_flush(ssh_s, %d) returned %zd\n",
+								ufds[0].fd, ret);
+						if (ret < 0) {
+							printf("ssh_flush() failed\n");
+							should_loop = 0;
+							break;
+						}
+
+						should_loop = 1;
+						break;
+					}
+
+					size_t i = 0;
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						printf("%02x ", data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						putchar(data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+
+					ret = ssh_write(ssh_c, type, data, len);
+					printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
+							ret);
+					if (ret < 0) {
+						printf("ssh_write() failed\n");
+						should_loop = 0;
+						break;
+					}
+
+					ret = ssh_flush(ssh_c, ufds[1].fd);
+					printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd,
+							ret);
+					if (ret < 0) {
+						printf("ssh_flush() failed\n");
+						should_loop = 0;
+						break;
+					}
 				}
-
-				size_t i = 0;
-				putchar('\n');
-				for (i = 0; i < len; i++) {
-					printf("%02x ", data[i]);
-				}
-				putchar('\n');
-
-				putchar('\n');
-				for (i = 0; i < len; i++) {
-					putchar(data[i]);
-				}
-				putchar('\n');
-
-				putchar('\n');
-
-				ret = ssh_write(ssh_c, ufds[1].fd, type, data, len);
-				printf("ssh_write(%d) returned %zd\n", ufds[1].fd, ret);
-				if (ret < 0) {
-					printf("ssh_write() failed\n");
+				if (!should_loop) {
 					break;
 				}
+
+				printf("\n++++++++++++++++++\n");
 			}
 
-			ufds1: ;
 			if (ufds[1].revents & POLLIN) {
-				printf("real_server_fd ready\n");
+				printf("\n------------------\n");
+
+				printf("Data available from server\n");
 
 				u_char type = 0;
 				const u_char* data = NULL;
 				size_t len = 0;
 				ssize_t ret = 0;
 
-				ret = ssh_read(ssh_c, ufds[1].fd, ufds[1].fd, &type, &data,
-						&len);
-				printf("ssh_read(%d, %d) returned %zd\n", ufds[1].fd,
-						ufds[1].fd, ret);
+				ret = ssh_fill(ssh_c, ufds[1].fd);
+				printf("ssh_fill(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
 				if (ret < 0) {
 					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
-						continue;
+						printf("ssh_fill() would block\n");
 					} else {
-						printf("ssh_read() failed\n");
+						printf("ssh_fill() failed\n");
 						break;
 					}
 				}
 
-				printf("type: %u, data: %p, len: %zu\n", type, data, len);
-				size_t i = 0;
+				u_char should_loop = 1;
+				while (1) {
+					ret = ssh_read(ssh_c, &type, &data, &len);
+					printf(
+							"ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
+							ret, type, data, len);
+					if (ret < 0) {
+						printf("ssh_read() failed\n");
+						ssh_flush(ssh_s, ufds[0].fd);
+						should_loop = 0;
+						break;
+					}
+					if (type == 90) {
+						printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
+					} else if (type == 0) {
+						printf("\n\nSSH_MSG_NONE\n\n");
 
-				putchar('\n');
-				for (i = 0; i < len; i++) {
-					printf("%02x ", data[i]);
+						ret = ssh_flush(ssh_c, ufds[1].fd);
+						printf("ssh_flush(ssh_c, %d) returned %zd\n",
+								ufds[1].fd, ret);
+						if (ret < 0) {
+							printf("ssh_flush() failed\n");
+							should_loop = 0;
+							break;
+						}
+
+						should_loop = 1;
+						break;
+					}
+
+					size_t i = 0;
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						printf("%02x ", data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						putchar(data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+
+					ret = ssh_write(ssh_s, type, data, len);
+					printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,
+							ret);
+					if (ret < 0) {
+						printf("ssh_write() failed\n");
+						should_loop = 0;
+						break;
+					}
+
+					ret = ssh_flush(ssh_s, ufds[0].fd);
+					printf("ssh_flush(ssh_s, %d) returned %zd\n", ufds[0].fd,
+							ret);
+					if (ret < 0) {
+						printf("ssh_flush() failed\n");
+						should_loop = 0;
+						break;
+					}
 				}
-				putchar('\n');
-
-				putchar('\n');
-				for (i = 0; i < len; i++) {
-					putchar(data[i]);
-				}
-				putchar('\n');
-
-				putchar('\n');
-
-				ret = ssh_write(ssh_s, ufds[0].fd, type, data, len);
-				printf("ssh_write(%d) returned %zd\n", ufds[0].fd, ret);
-				if (ret < 0) {
-					printf("ssh_write() failed\n");
+				if (!should_loop) {
 					break;
 				}
+
+				printf("\n++++++++++++++++++\n");
 			}
 		}
 	}
@@ -370,7 +475,560 @@ void* ssh_forwarder(void* arg) {
 	ssh_free(ssh_c);
 	sshkey_free(sshkey);
 	ssh_free(ssh_s);
+	shutdown(args->real_client_fd, SHUT_RDWR);
 	close(args->real_client_fd);
+	shutdown(real_server_fd, SHUT_RDWR);
+	close(real_server_fd);
+	//pthread_exit(NULL);
+	printf("thread for %d terminating\n", args->real_client_fd);
+	return NULL;
+}
+
+void* ssh_decoder_c(void* arg) {
+	struct ssh_forwarder_thread_arg* oarg = arg;
+	struct ssh_forwarder_thread_arg args_cpy = { 0 };
+
+	//copy arguments onto thread's own stack
+	memcpy(&args_cpy, oarg, sizeof(args_cpy));
+
+	//finish copying arguments onto own stack and wait until main thread has called pthread_detach()
+	if (args_cpy.barrier != NULL) {
+		pthread_barrier_wait(args_cpy.barrier);
+	}
+
+	printf("thread ready for %d\n", args_cpy.real_client_fd);
+
+	struct ssh_forwarder_thread_arg* args = &args_cpy;
+
+	int ret = -1;
+
+	int real_server_fd = -1;
+	struct ssh* ssh_s = NULL;
+	struct sshkey* sshkey = NULL;
+
+	real_server_fd = create_tcp_client_socket(args->server_hostname,
+			args->server_port);
+	if (real_server_fd < 0) {
+		fprintf(stderr, "create_tcp_client_socket() failed\n");
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*ignore SIGPIPE that can be possibly caused by writes to disconnected clients*/
+	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+		fprintf(stderr, "signal() error for %d\n", args->real_client_fd);
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+		fprintf(stderr, "signal() error for %d\n", real_server_fd);
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*set sockets to non-blocking*/
+	if (fcntl(args->real_client_fd, F_SETFL, O_NONBLOCK) < 0
+	/*|| fcntl(real_server_fd, F_SETFL, O_NONBLOCK) < 0*/) {
+		fprintf(stderr, "fcntl() failed\n");
+
+		close(args->real_client_fd);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*initialise SSH object*/
+	ret = ssh_init(&ssh_s, 1, NULL);
+	printf("ssh_init() returned %d, ssh: %p\n", ret, ssh_s);
+	if (ret != 0) {
+		printf("ssh_init() failed\n");
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*initialise SSH private key*/
+	sshkey = key_load_private(args->ssh_private_key_path, "",
+	NULL);
+	printf("key_load_private() returned %p\n", sshkey);
+	if (sshkey == NULL) {
+		printf("key_load_private() failed\n");
+
+		ssh_free(ssh_s);
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*add SSH private key to SSH object*/
+	ret = ssh_add_hostkey(ssh_s, sshkey);
+	printf("ssh_add_hostkey() returned %d\n", ret);
+	if (ret != 0) {
+		printf("ssh_add_hostkey() failed\n");
+
+		sshkey_free(sshkey);
+		ssh_free(ssh_s);
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*poll the two sockets*/
+	struct pollfd ufds[2];
+	ufds[0].fd = args->real_client_fd;
+	ufds[0].events = POLLIN;
+	ufds[1].fd = real_server_fd;
+	ufds[1].events = POLLIN;
+
+	{
+		u_char type = 0;
+		const u_char* data = NULL;
+		size_t len = 0;
+		//ssize_t ret = 0;
+		ssh_read(ssh_s, &type, &data, &len);
+		ssh_flush(ssh_s, ufds[0].fd);
+	}
+
+	while (1) {
+		ret = poll(ufds, 2, -1);
+
+		if (ret < 0) {
+			fprintf(stderr, "poll() failed\n");
+		} else if (ret == 0) {
+
+		} else {
+			printf("poll() returned %d\n", ret);
+
+			if (ufds[0].revents & POLLIN) {
+				printf("\n------------------\n");
+
+				printf("Data available from client\n");
+
+				u_char type = 0;
+				const u_char* data = NULL;
+				size_t len = 0;
+				ssize_t ret = 0;
+
+				ret = ssh_fill(ssh_s, ufds[0].fd);
+				printf("ssh_fill(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
+				if (ret < 0) {
+					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
+						printf("ssh_fill() would block\n");
+					} else {
+						printf("ssh_fill() failed\n");
+						break;
+					}
+				}
+
+				u_char should_loop = 1;
+				while (1) {
+					ret = ssh_read(ssh_s, &type, &data, &len);
+					printf(
+							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
+							ret, type, data, len);
+					if (ret < 0) {
+						printf("ssh_read() failed\n");
+						ssh_flush(ssh_s, ufds[0].fd);
+						should_loop = 0;
+						break;
+					}
+					if (type == 90) {
+						printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
+					} else if (type == 0) {
+						printf("\n\nSSH_MSG_NONE\n\n");
+
+						ret = ssh_flush(ssh_s, ufds[0].fd);
+						printf("ssh_flush(ssh_s, %d) returned %zd\n",
+								ufds[0].fd, ret);
+						if (ret < 0) {
+							printf("ssh_flush() failed\n");
+							should_loop = 0;
+							break;
+						}
+
+						should_loop = 1;
+						break;
+					}
+
+					size_t i = 0;
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						printf("%02x ", data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						putchar(data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+
+					ret = write_message_to_fd(ufds[1].fd, type, data, len);
+					printf("write_message_to_fd(%d) returned %zd\n", ufds[1].fd,
+							ret);
+					if (ret < 0) {
+						printf("write_message_to_fd() failed\n");
+						should_loop = 0;
+						break;
+					}
+				}
+				if (!should_loop) {
+					break;
+				}
+
+				printf("\n++++++++++++++++++\n");
+			}
+
+			if (ufds[1].revents & POLLIN) {
+				printf("\n------------------\n");
+
+				printf("Data available from server\n");
+
+				u_char type = 0;
+				u_char data[1024 * 64];
+				size_t len = 0;
+				ssize_t ret = 0;
+
+				ret = read_message_from_fd(ufds[1].fd, &type, data,
+						sizeof(data));
+				printf("read_message_from_fd(%d) returned %zd\n", ufds[1].fd,
+						ret);
+				if (ret < 0) {
+					printf("read_message_from_fd() failed\n");
+					break;
+				} else {
+					len = ret;
+				}
+
+				size_t i = 0;
+				putchar('\n');
+				for (i = 0; i < len; i++) {
+					printf("%02x ", data[i]);
+				}
+				putchar('\n');
+
+				putchar('\n');
+				for (i = 0; i < len; i++) {
+					putchar(data[i]);
+				}
+				putchar('\n');
+
+				putchar('\n');
+
+				ret = ssh_write(ssh_s, type, data, len);
+				printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
+				if (ret < 0) {
+					printf("ssh_write() failed\n");
+					break;
+				}
+
+				ret = ssh_flush(ssh_s, ufds[0].fd);
+				printf("ssh_flush(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
+				if (ret < 0) {
+					printf("ssh_flush() failed\n");
+					break;
+				}
+
+				printf("\n++++++++++++++++++\n");
+			}
+		}
+	}
+
+	sshkey_free(sshkey);
+	ssh_free(ssh_s);
+	shutdown(args->real_client_fd, SHUT_RDWR);
+	close(args->real_client_fd);
+	shutdown(real_server_fd, SHUT_RDWR);
+	close(real_server_fd);
+	//pthread_exit(NULL);
+	printf("thread for %d terminating\n", args->real_client_fd);
+	return NULL;
+}
+
+void* ssh_decoder_s(void* arg) {
+	struct ssh_forwarder_thread_arg* oarg = arg;
+	struct ssh_forwarder_thread_arg args_cpy = { 0 };
+
+	//copy arguments onto thread's own stack
+	memcpy(&args_cpy, oarg, sizeof(args_cpy));
+
+	//finish copying arguments onto own stack and wait until main thread has called pthread_detach()
+	if (args_cpy.barrier != NULL) {
+		pthread_barrier_wait(args_cpy.barrier);
+	}
+
+	printf("thread ready for %d\n", args_cpy.real_client_fd);
+
+	struct ssh_forwarder_thread_arg* args = &args_cpy;
+
+	int ret = -1;
+
+	int real_server_fd = -1;
+	struct ssh* ssh_c = NULL;
+
+	real_server_fd = create_tcp_client_socket(args->server_hostname,
+			args->server_port);
+	if (real_server_fd < 0) {
+		fprintf(stderr, "create_tcp_client_socket() failed\n");
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*ignore SIGPIPE that can be possibly caused by writes to disconnected clients*/
+	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+		fprintf(stderr, "signal() error for %d\n", args->real_client_fd);
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+		fprintf(stderr, "signal() error for %d\n", real_server_fd);
+
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*set sockets to non-blocking*/
+	if (/*fcntl(args->real_client_fd, F_SETFL, O_NONBLOCK) < 0
+	 ||*/fcntl(real_server_fd, F_SETFL, O_NONBLOCK) < 0) {
+		fprintf(stderr, "fcntl() failed\n");
+
+		close(args->real_client_fd);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*initialise SSH object*/
+	ret = ssh_init(&ssh_c, 0, NULL);
+	printf("ssh_init() returned %d, ssh: %p\n", ret, ssh_c);
+	if (ret != 0) {
+		printf("ssh_init() failed\n");
+
+		ssh_free(ssh_c);
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*set SSH host key verification function*/
+	int verify_host_key(struct sshkey* sshkey, struct ssh* ssh) {
+		return 0;
+	}
+	ret = ssh_set_verify_host_key_callback(ssh_c, verify_host_key);
+	if (ret != 0) {
+		printf("ssh_set_verify_host_key_callback() failed\n");
+
+		ssh_free(ssh_c);
+		shutdown(args->real_client_fd, SHUT_RDWR);
+		close(args->real_client_fd);
+		shutdown(real_server_fd, SHUT_RDWR);
+		close(real_server_fd);
+		//pthread_exit(NULL);
+		return NULL;
+	}
+
+	/*poll the two sockets*/
+	struct pollfd ufds[2];
+	ufds[0].fd = args->real_client_fd;
+	ufds[0].events = POLLIN;
+	ufds[1].fd = real_server_fd;
+	ufds[1].events = POLLIN;
+
+	{
+		u_char type = 0;
+		const u_char* data = NULL;
+		size_t len = 0;
+		//ssize_t ret = 0;
+		ssh_read(ssh_c, &type, &data, &len);
+		ssh_flush(ssh_c, ufds[0].fd);
+	}
+
+	while (1) {
+		ret = poll(ufds, 2, -1);
+
+		if (ret < 0) {
+			fprintf(stderr, "poll() failed\n");
+		} else if (ret == 0) {
+
+		} else {
+			printf("poll() returned %d\n", ret);
+
+			if (ufds[0].revents & POLLIN) {
+				printf("\n------------------\n");
+
+				printf("Data available from client\n");
+
+				u_char type = 0;
+				u_char data[1024 * 64];
+				size_t len = 0;
+				ssize_t ret = 0;
+
+				ret = read_message_from_fd(ufds[0].fd, &type, data,
+						sizeof(data));
+				printf("read_message_from_fd(%d) returned %zd\n", ufds[0].fd,
+						ret);
+				if (ret < 0) {
+					printf("read_message_from_fd() failed\n");
+					break;
+				} else {
+					len = ret;
+				}
+
+				size_t i = 0;
+				putchar('\n');
+				for (i = 0; i < len; i++) {
+					printf("%02x ", data[i]);
+				}
+				putchar('\n');
+
+				putchar('\n');
+				for (i = 0; i < len; i++) {
+					putchar(data[i]);
+				}
+				putchar('\n');
+
+				putchar('\n');
+
+				ret = ssh_write(ssh_c, type, data, len);
+				printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
+				if (ret < 0) {
+					printf("ssh_write() failed\n");
+					break;
+				}
+
+				ret = ssh_flush(ssh_c, ufds[1].fd);
+				printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
+				if (ret < 0) {
+					printf("ssh_flush() failed\n");
+					break;
+				}
+
+				printf("\n++++++++++++++++++\n");
+			}
+
+			if (ufds[1].revents & POLLIN) {
+				printf("\n------------------\n");
+
+				printf("Data available from server\n");
+
+				u_char type = 0;
+				const u_char* data = NULL;
+				size_t len = 0;
+				ssize_t ret = 0;
+
+				ret = ssh_fill(ssh_c, ufds[1].fd);
+				printf("ssh_fill(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
+				if (ret < 0) {
+					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
+						printf("ssh_fill() would block\n");
+					} else {
+						printf("ssh_fill() failed\n");
+						break;
+					}
+				}
+
+				u_char should_loop = 1;
+				while (1) {
+					ret = ssh_read(ssh_c, &type, &data, &len);
+					printf(
+							"ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
+							ret, type, data, len);
+					if (ret < 0) {
+						printf("ssh_read() failed\n");
+						should_loop = 0;
+						break;
+					}
+					if (type == 90) {
+						printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
+					} else if (type == 0) {
+						printf("\n\nSSH_MSG_NONE\n\n");
+
+						ret = ssh_flush(ssh_c, ufds[1].fd);
+						printf("ssh_flush(ssh_c, %d) returned %zd\n",
+								ufds[1].fd, ret);
+						if (ret < 0) {
+							printf("ssh_flush() failed\n");
+							should_loop = 0;
+							break;
+						}
+
+						should_loop = 1;
+						break;
+					}
+
+					size_t i = 0;
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						printf("%02x ", data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+					for (i = 0; i < len; i++) {
+						putchar(data[i]);
+					}
+					putchar('\n');
+
+					putchar('\n');
+
+					ret = write_message_to_fd(ufds[0].fd, type, data, len);
+					printf("write_message_to_fd(%d) returned %zd\n", ufds[0].fd,
+							ret);
+					if (ret < 0) {
+						printf("write_message_to_fd() failed\n");
+						should_loop = 0;
+						break;
+					}
+				}
+				if (!should_loop) {
+					break;
+				}
+
+				printf("\n++++++++++++++++++\n");
+			}
+		}
+	}
+
+	ssh_free(ssh_c);
+	shutdown(args->real_client_fd, SHUT_RDWR);
+	close(args->real_client_fd);
+	shutdown(real_server_fd, SHUT_RDWR);
 	close(real_server_fd);
 	//pthread_exit(NULL);
 	printf("thread for %d terminating\n", args->real_client_fd);
@@ -379,10 +1037,9 @@ void* ssh_forwarder(void* arg) {
 
 int main(int argc, char* argv[]) {
 	int mode = -1;
-	char* private_key = NULL;
-	char* hostname = NULL;
-	char* port = NULL;
 
+	char* private_key = NULL;
+	char* port = NULL;
 	char* dst_hostname = NULL;
 	char* dst_port = NULL;
 
@@ -393,59 +1050,67 @@ int main(int argc, char* argv[]) {
 		argv0 = " ";
 	}
 
-	if (argc < 4) {
-		printf("Usage: %s s <private key> <port>\n", argv0);
-		printf("       %s c <hostname> <port>\n", argv0);
+	if (argc < 6) {
+		printf("Usage: %s e <private key> <port> <dst hostname> <dst port>\n",
+				argv0);
 		printf("       %s f <private key> <port> <dst hostname> <dst port>\n",
 				argv0);
+		printf("       %s g <private key> <port> <dst hostname> <dst port>\n",
+				argv0);
+		printf("       %s h <private key> <port> <dst hostname> <dst port>\n",
+				argv0);
 		return 1;
-	} else {
-		if (strcmp(argv[1], "s") == 0) {
-			mode = 1;
-			private_key = argv[2];
-			port = argv[3];
-		} else if (strcmp(argv[1], "c") == 0) {
-			mode = 0;
-			hostname = argv[2];
-			port = argv[3];
-		} else if (strcmp(argv[1], "f") == 0) {
-			if (argc < 6) {
-				printf(
-						"Usage: %s f <private key> <port> <dst hostname> <dst port>\n",
-						argv0);
-				return 1;
-			}
-			mode = 2;
-			private_key = argv[2];
-			port = argv[3];
-			dst_hostname = argv[4];
-			dst_port = argv[5];
-		} else {
-			printf("first argument must be either 's' or 'c'\n");
-			return 1;
-		}
 	}
 
-	if (mode == 2) {
+	if (strcmp(argv[1], "e") == 0) {
+		mode = 0;
+		private_key = argv[2];
+		port = argv[3];
+		dst_hostname = argv[4];
+		dst_port = argv[5];
+	} else if (strcmp(argv[1], "f") == 0) {
+		mode = 1;
+		private_key = argv[2];
+		port = argv[3];
+		dst_hostname = argv[4];
+		dst_port = argv[5];
+	} else if (strcmp(argv[1], "g") == 0) {
+		mode = 2;
+		private_key = argv[2];
+		port = argv[3];
+		dst_hostname = argv[4];
+		dst_port = argv[5];
+	} else if (strcmp(argv[1], "h") == 0) {
+		mode = 3;
+		private_key = argv[2];
+		port = argv[3];
+		dst_hostname = argv[4];
+		dst_port = argv[5];
+	} else {
+		printf("first argument is invalid\n");
+		return 1;
+	}
+
+	if (mode == 0) {
 		struct ssh_forwarder_thread_arg ssh_forwarder_thread_arg = { 0 };
-		pthread_t ssh_forwarder_thread;
-		pthread_barrier_t* ssh_forwarder_thread_barrier = malloc(
-				sizeof(pthread_barrier_t));
-		if (ssh_forwarder_thread_barrier == NULL) {
-			fprintf(stderr, "malloc() for barrier failed\n");
+		//pthread_t ssh_forwarder_thread;
+		/*pthread_barrier_t* ssh_forwarder_thread_barrier = malloc(
+		 sizeof(pthread_barrier_t));
+		 if (ssh_forwarder_thread_barrier == NULL) {
+		 fprintf(stderr, "malloc() for barrier failed\n");
 
-			return 1;
-		}
-		if (pthread_barrier_init(ssh_forwarder_thread_barrier, NULL, 2) < 0) {
-			fprintf(stderr, "pthread_barrier_init() failed\n");
+		 return 1;
+		 }
+		 if (pthread_barrier_init(ssh_forwarder_thread_barrier, NULL, 2) < 0) {
+		 fprintf(stderr, "pthread_barrier_init() failed\n");
 
-			free(ssh_forwarder_thread_barrier);
-			return 1;
-		}
+		 free(ssh_forwarder_thread_barrier);
+		 return 1;
+		 }*/
 		ssh_forwarder_thread_arg.ssh_private_key_path = private_key;
 		ssh_forwarder_thread_arg.server_hostname = dst_hostname;
 		ssh_forwarder_thread_arg.server_port = dst_port;
-		ssh_forwarder_thread_arg.barrier = ssh_forwarder_thread_barrier;
+		ssh_forwarder_thread_arg.barrier = NULL;
 
 		uint16_t portnum = strtol(port, NULL, 10);
 		int sockfd = create_tcp_listening_socket(portnum);
@@ -453,6 +1118,7 @@ int main(int argc, char* argv[]) {
 		if (sockfd < 0) {
 			printf("create_tcp_listening_socket() failed\n");
 
+			//free(ssh_forwarder_thread_barrier);
 			return 1;
 		}
 
@@ -484,43 +1150,32 @@ int main(int argc, char* argv[]) {
 			//printf("thread created for %d\n", newfd);
 		}
 	} else if (mode == 1) {
-		/*initialise SSH object*/
-		struct ssh* ssh = NULL;
-		int ret = ssh_init(&ssh, 1, NULL);
-		printf("ssh_init() returned %d, ssh: %p\n", ret, ssh);
-		if (ret != 0) {
-			printf("ssh_init() failed\n");
-			ssh_free(ssh);
-			return 1;
-		}
+		struct ssh_forwarder_thread_arg ssh_forwarder_thread_arg = { 0 };
+		pthread_barrier_t* ssh_forwarder_thread_barrier = malloc(
+				sizeof(pthread_barrier_t));
+		if (ssh_forwarder_thread_barrier == NULL) {
+			fprintf(stderr, "malloc() for barrier failed\n");
 
-		/*initialise SSH private key*/
-		struct sshkey* sshkey = key_load_private(private_key, "",
-		NULL);
-		printf("key_load_private() returned %p\n", sshkey);
-		if (sshkey == NULL) {
-			printf("key_load_private() failed\n");
-			ssh_free(ssh);
 			return 1;
 		}
+		if (pthread_barrier_init(ssh_forwarder_thread_barrier, NULL, 2) < 0) {
+			fprintf(stderr, "pthread_barrier_init() failed\n");
 
-		/*add SSH private key to SSH object*/
-		ret = ssh_add_hostkey(ssh, sshkey);
-		printf("ssh_add_hostkey() returned %d\n", ret);
-		if (ret != 0) {
-			printf("ssh_add_hostkey() failed\n");
-			sshkey_free(sshkey);
-			ssh_free(ssh);
+			free(ssh_forwarder_thread_barrier);
 			return 1;
 		}
+		ssh_forwarder_thread_arg.ssh_private_key_path = private_key;
+		ssh_forwarder_thread_arg.server_hostname = dst_hostname;
+		ssh_forwarder_thread_arg.server_port = dst_port;
+		ssh_forwarder_thread_arg.barrier = ssh_forwarder_thread_barrier;
 
 		uint16_t portnum = strtol(port, NULL, 10);
 		int sockfd = create_tcp_listening_socket(portnum);
 		printf("create_tcp_listening_socket() returned %d\n", sockfd);
 		if (sockfd < 0) {
 			printf("create_tcp_listening_socket() failed\n");
-			sshkey_free(sshkey);
-			ssh_free(ssh);
+
+			free(ssh_forwarder_thread_barrier);
 			return 1;
 		}
 
@@ -532,114 +1187,135 @@ int main(int argc, char* argv[]) {
 				continue;
 			}
 
-			while (1) {
-				u_char type = 0;
-				const u_char* data = NULL;
-				size_t len = 0;
-				ssize_t ret = 0;
+			ssh_forwarder_thread_arg.real_client_fd = newfd;
 
-				ret = ssh_read(ssh, newfd, newfd, &type, &data, &len);
-				printf("ssh_read() returned %zd\n", ret);
-				if (ret == 0) {
-					printf("ssh_read() EOF\n");
-					exit(1);
-				} else if (ret < 0) {
-					printf("ssh_read() failed\n");
-					exit(1);
-				}
+			pthread_t ssh_forwarder_thread;
+			if (pthread_create(&ssh_forwarder_thread, NULL, ssh_forwarder,
+					&ssh_forwarder_thread_arg) != 0) {
+				fprintf(stderr, "pthread_create() failed\n");
 
-				printf("type: %u, data: %p, len: %zu\n", type, data, len);
-				size_t i = 0;
-				putchar('\n');
-				for (i = 0; i < len; i++) {
-					putchar(data[i]);
-				}
-				putchar('\n');
-
-				putchar('\n');
-				for (i = 0; i < len; i++) {
-					printf("%02x ", data[i]);
-				}
-				putchar('\n');
-				putchar('\n');
-
-				ret = ssh_write(ssh, newfd, 123, "123", 3);
-				printf("ssh_write() returned %zd\n", ret);
-				if (ret < 0) {
-					printf("ssh_write() failed\n");
-					exit(1);
-				}
+				close(newfd);
+				continue;
 			}
+
+			/*must be called to avoid memory leaks*/
+			pthread_detach(ssh_forwarder_thread);
+			/*allow pthread_detach() to be called before new thread terminates and
+			 wait until the thread finishes copying arguments onto its own stack*/
+			pthread_barrier_wait(ssh_forwarder_thread_barrier);
+			printf("thread created for %d\n", newfd);
 		}
-	} else if (mode == 0) {
-		/*initialise SSH object*/
-		struct ssh* ssh = NULL;
-		int ret = ssh_init(&ssh, 0, NULL);
-		printf("ssh_init() returned %d, ssh: %p\n", ret, ssh);
-		if (ret != 0) {
-			printf("ssh_init() failed\n");
-			ssh_free(ssh);
+	} else if (mode == 2) {
+		struct ssh_forwarder_thread_arg ssh_forwarder_thread_arg = { 0 };
+		pthread_barrier_t* ssh_forwarder_thread_barrier = malloc(
+				sizeof(pthread_barrier_t));
+		if (ssh_forwarder_thread_barrier == NULL) {
+			fprintf(stderr, "malloc() for barrier failed\n");
+
 			return 1;
 		}
+		if (pthread_barrier_init(ssh_forwarder_thread_barrier, NULL, 2) < 0) {
+			fprintf(stderr, "pthread_barrier_init() failed\n");
 
-		int verify_host_key(struct sshkey* sshkey, struct ssh* ssh) {
-			return 0;
-		}
-		ret = ssh_set_verify_host_key_callback(ssh, verify_host_key);
-		if (ret != 0) {
-			printf("ssh_set_verify_host_key_callback() failed\n");
-			ssh_free(ssh);
+			free(ssh_forwarder_thread_barrier);
 			return 1;
 		}
+		ssh_forwarder_thread_arg.ssh_private_key_path = private_key;
+		ssh_forwarder_thread_arg.server_hostname = dst_hostname;
+		ssh_forwarder_thread_arg.server_port = dst_port;
+		ssh_forwarder_thread_arg.barrier = ssh_forwarder_thread_barrier;
 
-		int sockfd = create_tcp_client_socket(hostname, port);
-		printf("create_tcp_client_socket() returned %d\n", sockfd);
+		uint16_t portnum = strtol(port, NULL, 10);
+		int sockfd = create_tcp_listening_socket(portnum);
+		printf("create_tcp_listening_socket() returned %d\n", sockfd);
 		if (sockfd < 0) {
-			printf("create_tcp_client_socket() failed\n");
-			ssh_free(ssh);
-			return 1;
-		}
+			printf("create_tcp_listening_socket() failed\n");
 
-		struct ssh_sender_thread_arg ssta = { ssh, sockfd };
-		pthread_t thread;
-		ret = pthread_create(&thread, NULL, ssh_sender_thread, &ssta);
-		printf("pthread_create() returned %d\n", ret);
-		if (ret < 0) {
-			printf("pthread_create() failed\n");
-			exit(1);
+			free(ssh_forwarder_thread_barrier);
+			return 1;
 		}
 
 		while (1) {
-			u_char type = 0;
-			const u_char* data = NULL;
-			size_t len = 0;
-			ssize_t ret = 0;
-
-			ret = ssh_read(ssh, sockfd, sockfd, &type, &data, &len);
-			printf("ssh_read() returned %zd\n", ret);
-			if (ret == 0) {
-				printf("ssh_read() EOF\n");
-				exit(1);
-			} else if (ret < 0) {
-				printf("ssh_read() failed\n");
-				exit(1);
+			int newfd = accept(sockfd, NULL, NULL);
+			printf("accept() returned %d\n", newfd);
+			if (newfd < 0) {
+				printf("accept() failed\n");
+				continue;
 			}
 
-			printf("type: %u, data: %p, len: %zu\n", type, data, len);
-			size_t i = 0;
-			putchar('\n');
-			for (i = 0; i < len; i++) {
-				putchar(data[i]);
-			}
-			putchar('\n');
+			ssh_forwarder_thread_arg.real_client_fd = newfd;
 
-			putchar('\n');
-			for (i = 0; i < len; i++) {
-				printf("%02x ", data[i]);
-			}
-			putchar('\n');
-			putchar('\n');
+			pthread_t ssh_forwarder_thread;
+			if (pthread_create(&ssh_forwarder_thread, NULL, ssh_decoder_c,
+					&ssh_forwarder_thread_arg) != 0) {
+				fprintf(stderr, "pthread_create() failed\n");
 
+				close(newfd);
+				continue;
+			}
+
+			/*must be called to avoid memory leaks*/
+			pthread_detach(ssh_forwarder_thread);
+			/*allow pthread_detach() to be called before new thread terminates and
+			 wait until the thread finishes copying arguments onto its own stack*/
+			pthread_barrier_wait(ssh_forwarder_thread_barrier);
+			printf("thread created for %d\n", newfd);
+		}
+	} else if (mode == 3) {
+		struct ssh_forwarder_thread_arg ssh_forwarder_thread_arg = { 0 };
+		pthread_barrier_t* ssh_forwarder_thread_barrier = malloc(
+				sizeof(pthread_barrier_t));
+		if (ssh_forwarder_thread_barrier == NULL) {
+			fprintf(stderr, "malloc() for barrier failed\n");
+
+			return 1;
+		}
+		if (pthread_barrier_init(ssh_forwarder_thread_barrier, NULL, 2) < 0) {
+			fprintf(stderr, "pthread_barrier_init() failed\n");
+
+			free(ssh_forwarder_thread_barrier);
+			return 1;
+		}
+		ssh_forwarder_thread_arg.ssh_private_key_path = private_key;
+		ssh_forwarder_thread_arg.server_hostname = dst_hostname;
+		ssh_forwarder_thread_arg.server_port = dst_port;
+		ssh_forwarder_thread_arg.barrier = ssh_forwarder_thread_barrier;
+
+		uint16_t portnum = strtol(port, NULL, 10);
+		int sockfd = create_tcp_listening_socket(portnum);
+		printf("create_tcp_listening_socket() returned %d\n", sockfd);
+		if (sockfd < 0) {
+			printf("create_tcp_listening_socket() failed\n");
+
+			free(ssh_forwarder_thread_barrier);
+			return 1;
+		}
+
+		while (1) {
+			int newfd = accept(sockfd, NULL, NULL);
+			printf("accept() returned %d\n", newfd);
+			if (newfd < 0) {
+				printf("accept() failed\n");
+				continue;
+			}
+
+			ssh_forwarder_thread_arg.real_client_fd = newfd;
+
+			pthread_t ssh_forwarder_thread;
+			if (pthread_create(&ssh_forwarder_thread, NULL, ssh_decoder_s,
+					&ssh_forwarder_thread_arg) != 0) {
+				fprintf(stderr, "pthread_create() failed\n");
+
+				close(newfd);
+				continue;
+			}
+
+			/*must be called to avoid memory leaks*/
+			pthread_detach(ssh_forwarder_thread);
+			/*allow pthread_detach() to be called before new thread terminates and
+			 wait until the thread finishes copying arguments onto its own stack*/
+			pthread_barrier_wait(ssh_forwarder_thread_barrier);
+			printf("thread created for %d\n", newfd);
 		}
 	}
 
@@ -726,128 +1402,27 @@ static int create_tcp_client_socket(char* hostname, char* port) {
 	return sockfd;
 }
 
-ssize_t ssh_read(struct ssh* ssh, int in_fd, int out_fd, u_char* type,
-		const u_char** datap, size_t* len) {
-	char buffer[8192] = { 0 };
-
+ssize_t ssh_read(struct ssh* ssh, u_char* type, const u_char** datap,
+		size_t* len) {
 	int ret = ssh_packet_next(ssh, type);
 	printf("ssh_read: ssh_packet_next returned %d, type: %u\n", ret, *type);
 	if (ret < 0) {
 		printf("ssh_read: ssh_packet_next error\n");
 		return -1;
 	} else {
-		//packet available
 		if (*type != 0) {
+			//packet available
 			*datap = ssh_packet_payload(ssh, len);
 			return *len;
-		}
-	}
-
-	while (1) {
-		ssize_t sret;
-		int errn;
-
-		//read from in_fd and fill the SSH input byte stream
-		/*sret = read(in_fd, buffer, sizeof(buffer));
-		 errn = errno;
-		 printf("ssh_read: read returned %zd\n", sret);
-		 if (sret < 0) {
-		 printf("ssh_read: read error\n");
-		 if (errn > 0) {
-		 return -errn;
-		 } else {
-		 return -1;
-		 }
-		 } else if (sret == 0) {
-		 //EOF
-		 //printf("ssh_read: read EOF\n");
-		 return 0;
-		 } else {
-		 ret = ssh_input_append(ssh, buffer, (size_t) sret);
-		 printf("ssh_read: ssh_input_append(%zu) returned %d\n", sret, ret);
-		 if (ret < 0) {
-		 printf("ssh_read: ssh_input_append error\n");
-		 return -1;
-		 }
-		 }*/
-
-		ret = ssh_packet_next(ssh, type);
-		printf("ssh_read: ssh_packet_next returned %d, type: %u\n", ret, *type);
-		if (ret < 0) {
-			printf("ssh_read: ssh_packet_next error\n");
-			return -1;
-		}
-
-		//packet available
-		if (*type != 0) {
-			break;
-		}
-
-		//not enough data in SSH input stream
-		//send SSH output byte stream
-		const u_char* b = NULL;
-		size_t l = 0;
-		b = ssh_output_ptr(ssh, &l);
-		printf("ssh_read: ssh_output_ptr() returned %p, len: %zu\n", b, l);
-		size_t bytes_sent = 0;
-		while (bytes_sent < l) {
-			ssize_t wret = write(out_fd, b + bytes_sent, l - bytes_sent);
-			int errn = errno;
-			printf("ssh_read: write returned %zd\n", wret);
-			if (wret < 0) {
-				printf("ssh_read: write error, errno: %d\n", errn);
-				if (errn > 0) {
-					return -errn;
-				} else {
-					return -1;
-				}
-			} else {
-				ret = ssh_output_consume(ssh, wret);
-				printf("ssh_read: ssh_output_consume returned %d\n", ret);
-				if (ret < 0) {
-					printf("ssh_read: ssh_output_consume error\n");
-					return -1;
-				}
-			}
-			bytes_sent += wret;
-		}
-
-		//read from in_fd and fill the SSH input byte stream
-		sret = read(in_fd, buffer, sizeof(buffer));
-		errn = errno;
-		putchar('\n');
-		putchar('\n');
-		printf("ssh_read: read returned %zd\n", sret);
-		putchar('\n');
-		putchar('\n');
-		if (sret < 0) {
-			printf("ssh_read: read error\n");
-			if (errn > 0) {
-				return -errn;
-			} else {
-				return -1;
-			}
-		} else if (sret == 0) {
-			//EOF
-			printf("ssh_read: read EOF\n");
-			return -1;
 		} else {
-			ret = ssh_input_append(ssh, buffer, sret);
-			printf("ssh_read: ssh_input_append(%zd) returned %d\n", sret, ret);
-			if (ret < 0) {
-				printf("ssh_read: ssh_input_append error\n");
-				return -1;
-			}
+			//packet unavailable
+			*datap = NULL;
+			return 0;
 		}
 	}
-
-	//return packet type and payload to caller
-	*datap = ssh_packet_payload(ssh, len);
-	return *len;
 }
 
-ssize_t ssh_write(struct ssh* ssh, int out_fd, u_char type, const u_char* data,
-		size_t len) {
+ssize_t ssh_write(struct ssh* ssh, u_char type, const u_char* data, size_t len) {
 	int ret = ssh_packet_put(ssh, type, data, len);
 	printf("ssh_write: ssh_packet_put returned %d\n", ret);
 	if (ret < 0) {
@@ -855,35 +1430,41 @@ ssize_t ssh_write(struct ssh* ssh, int out_fd, u_char type, const u_char* data,
 		return -1;
 	}
 
-	//send SSH output byte stream
-	const u_char* b = NULL;
-	size_t l = 0;
-	b = ssh_output_ptr(ssh, &l);
-	printf("ssh_write: ssh_output_ptr() returned %p, len: %zu\n", b, l);
-	size_t bytes_sent = 0;
-	while (bytes_sent < l) {
-		ssize_t wret = write(out_fd, b + bytes_sent, l - bytes_sent);
-		int errn = errno;
-		printf("ssh_write: write returned %zd\n", wret);
-		if (wret < 0) {
-			printf("ssh_write: write error, errno: %d\n", errn);
-			if (errn > 0) {
-				return -errn;
-			} else {
-				return -1;
-			}
+	return len;
+}
+
+ssize_t ssh_fill(struct ssh* ssh, int in_fd) {
+	char buffer[1024 * 16];
+
+	//read from in_fd and fill the SSH input byte stream
+	ssize_t sret = read(in_fd, buffer, sizeof(buffer));
+	int errn = errno;
+	putchar('\n');
+	putchar('\n');
+	printf("ssh_fill: read() returned %zd\n", sret);
+	putchar('\n');
+	putchar('\n');
+	if (sret < 0) {
+		printf("ssh_fill: read() error\n");
+		if (errn > 0) {
+			return -errn;
 		} else {
-			ret = ssh_output_consume(ssh, wret);
-			printf("ssh_write: ssh_output_consume returned %d\n", ret);
-			if (ret < 0) {
-				printf("ssh_write: ssh_output_consume error\n");
-				return -1;
-			}
+			return -1;
 		}
-		bytes_sent += wret;
+	} else if (sret == 0) {
+		//EOF
+		printf("ssh_fill: read() EOF\n");
+		return -1;
+	} else {
+		int ret = ssh_input_append(ssh, buffer, sret);
+		printf("ssh_fill: ssh_input_append(%zd) returned %d\n", sret, ret);
+		if (ret < 0) {
+			printf("ssh_fill: ssh_input_append() error\n");
+			return -1;
+		}
 	}
 
-	return len;
+	return sret;
 }
 
 ssize_t ssh_flush(struct ssh* ssh, int out_fd) {
@@ -898,7 +1479,7 @@ ssize_t ssh_flush(struct ssh* ssh, int out_fd) {
 		int errn = errno;
 		//printf("ssh_flush: write returned %zd\n", wret);
 		if (wret < 0) {
-			printf("ssh_flush: write error, errno: %d\n", errn);
+			printf("ssh_flush: write() error, errno: %d\n", errn);
 			if (errn > 0) {
 				return -errn;
 			} else {
@@ -909,6 +1490,111 @@ ssize_t ssh_flush(struct ssh* ssh, int out_fd) {
 			//printf("ssh_flush: ssh_output_consume returned %d\n", ret);
 			if (ret < 0) {
 				//printf("ssh_flush: ssh_output_consume error\n");
+				return -1;
+			}
+		}
+		bytes_sent += wret;
+	}
+
+	return bytes_sent;
+}
+
+ssize_t read_message_from_fd(int fd, u_char* type, u_char* buffer,
+		size_t buffer_len) {
+	uint32_t message_length;
+	uint8_t message_type;
+
+	ssize_t ret = fd_read_full(fd, (u_char*) &message_length,
+			sizeof(message_length));
+	if (ret < 0) {
+		return -1;
+	}
+	message_length = ntohl(message_length);
+	if (message_length > buffer_len) {
+		return -1;
+	}
+
+	ret = fd_read_full(fd, (u_char*) &message_type, sizeof(message_type));
+	if (ret < 0) {
+		return -1;
+	}
+
+	ret = fd_read_full(fd, buffer, message_length);
+	if (ret < 0) {
+		return -1;
+	}
+
+	*type = message_type;
+	return message_length;
+}
+
+ssize_t write_message_to_fd(int fd, u_char type, const u_char* data, size_t len) {
+	uint32_t len_n = htonl((uint32_t) len);
+	uint8_t type_n = (uint8_t) type;
+
+	ssize_t written = 0;
+
+	ssize_t ret = fd_write_full(fd, (u_char*) &len_n, sizeof(len_n));
+	printf("fd_write_full(%d) returned %zd\n", fd, ret);
+	if (ret < 0) {
+		printf("fd_write_full() failed\n");
+		return -1;
+	}
+	written += ret;
+
+	ret = fd_write_full(fd, &type_n, sizeof(type_n));
+	printf("fd_write_full(%d) returned %zd\n", fd, ret);
+	if (ret < 0) {
+		printf("fd_write_full() failed\n");
+		return -1;
+	}
+	written += ret;
+
+	ret = fd_write_full(fd, data, len);
+	printf("fd_write_full(%d) returned %zd\n", fd, ret);
+	if (ret < 0) {
+		printf("fd_write_full() failed\n");
+		return -1;
+	}
+	written += ret;
+
+	return written;
+}
+
+ssize_t fd_read_full(int in_fd, u_char* buffer, size_t len) {
+	size_t bytes_read = 0;
+	while (bytes_read < len) {
+		ssize_t ret = read(in_fd, buffer + bytes_read, len - bytes_read);
+		int errn = errno;
+		//printf("ssh_flush: write returned %zd\n", wret);
+		if (ret < 0) {
+			printf("fd_read_full: read() error, errno: %d\n", errn);
+			if (errn > 0) {
+				return -errn;
+			} else {
+				return -1;
+			}
+		} else if (ret == 0) {
+			printf("fd_read_full: read() EOF\n");
+			return -1;
+		}
+		bytes_read += ret;
+	}
+
+	return bytes_read;
+}
+
+ssize_t fd_write_full(int out_fd, const u_char* buffer, size_t len) {
+	size_t bytes_sent = 0;
+	while (bytes_sent < len) {
+		ssize_t wret = write(out_fd, buffer + bytes_sent, len - bytes_sent);
+		int errn = errno;
+		//printf("ssh_flush: write returned %zd\n", wret);
+		if (wret < 0) {
+			printf("fd_write_full: write() error, errno: %d\n", errn);
+			if (errn > 0) {
+				return -errn;
+			} else {
 				return -1;
 			}
 		}
