@@ -1,0 +1,57 @@
+/*
+ * my_vm_pool.c
+ *
+ *  Created on: 29 Dec 2017
+ *      Author: lqy
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <pthread.h>
+
+enum my_vm_state {
+	uncompromised_idle,
+	uncompromised_connected,
+	compromised_connected,
+	compromised_idle,
+	reinstalling
+};
+
+struct my_vm_instance {
+	uint32_t id;
+	uint32_t conn_count;
+	enum my_vm_state vm_state;
+	uint8_t ip_addr[16];
+	time_t last_disconn;
+	pthread_rwlock_t lock;
+};
+
+struct my_vm_pool {
+	uint32_t pool_size;
+	char* base_image_name;
+	char* base_snapshot_name;
+	char* vm_name_prefix;
+	time_t idle_timeout;
+	struct my_vm_instance* pool;
+};
+
+struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
+		const char* base_image_name, const char* base_snapshot_name,
+		const char* vm_name_prefix, time_t idle_timeout);
+
+int my_vm_pool_request(struct my_vm_pool* vm_pool, uint8_t client_ip_addr[16],
+		uint32_t* vm_id_out);
+
+int my_vm_pool_release(struct my_vm_pool* vm_pool, uint32_t vm_id);
+
+int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, const char* nic_name,
+		uint8_t vm_ip_addr_out[16]);
+
+int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool);
+
+int my_vm_pool_set_compromised(struct my_vm_pool* vm_pool, uint32_t vm_id);
+
+void my_vm_pool_free(struct my_vm_pool* vm_pool, int delete_all_vm);
