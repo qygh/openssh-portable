@@ -11,6 +11,8 @@
 #include <curl/curl.h>
 #include <jansson.h>
 
+#include "sds.h"
+
 #define DEFAULT_LXD_UNIX_SOCKET_PATH "/var/lib/lxd/unix.socket"
 
 struct my_lxd_api {
@@ -138,14 +140,79 @@ int my_lxd_api_get_container_ip(struct my_lxd_api* lxd_api,
 		return -1;
 	}
 
-	struct my_curl_memory* mcm = my_curl_memory_new();
-	if (mcm == NULL) {
+	sds url = sdscatprintf(sdsempty(),
+			"http://example.com/1.0/containers/%s/state", container_name);
+	if (url == NULL) {
 		return -1;
 	}
-	curl_easy_setopt(lxd_api->curl, CURLOPT_URL,
-			"http://example.com/1.0/containers/xenial/state");
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
 	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
 
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+
+	fprintf(stderr, "Data: \n");
+	fprintf(stderr, "%s\n", mcm->mem);
+
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	if (!json_is_object(jroot)) {
+		fprintf(stderr, "error: root is not an object\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	json_t* jmetadata = json_object_get(jroot, "metadata");
+	if (jmetadata == NULL) {
+		fprintf(stderr, "failed to get metadata\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	json_decref(jroot);
 	my_curl_memory_free(mcm);
+	sdsfree(url);
 	return 0;
 }
