@@ -5,105 +5,192 @@
  *      Author: lqy
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <curl/curl.h>
-#include <jansson.h>
+#include "my_curl_memory.h"
+#include "my_lxd_api.h"
 
-#include "sds.h"
+//gcc -g -O3 -Wall -Wextra my_lxd_api.c my_curl_memory.c sds.c -lcurl -ljansson -o my_lxd_api
 
-//gcc -O3 -Wall -Wextra my_lxd_api.c sds.c -lcurl -ljansson -o my_lxd_api
-
-#define DEFAULT_LXD_UNIX_SOCKET_PATH "/var/lib/lxd/unix.socket"
-
-struct my_lxd_api {
-	char* lxd_unix_socket_path;
-	CURL* curl;
-	pthread_mutex_t curl_lock;
-};
-
-struct my_curl_memory {
-	char* mem;
-	size_t size;
-};
-
-struct my_curl_memory* my_curl_memory_new() {
-	struct my_curl_memory* mcm = malloc(sizeof(struct my_curl_memory));
-	if (mcm == NULL) {
-		return NULL;
+static int my_lxd_api_wait_operation(struct my_lxd_api* lxd_api,
+		const char* operation_uri) {
+	if (lxd_api == NULL || operation_uri == NULL) {
+		return -1;
 	}
 
-	mcm->mem = NULL;
-	mcm->size = 0;
-	return mcm;
+	sds url = sdscatprintf(sdsempty(), "http://example.com%s/wait",
+			operation_uri);
+	if (url == NULL) {
+		return -1;
+	}
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 200) {
+		fprintf(stderr, "status_code is not 200\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	return 0;
 }
 
-size_t my_curl_memory_write(void* data, size_t size, size_t nmemb,
-		struct my_curl_memory* mcm) {
-	printf("my_curl_memory_write(%p, %zu, %zu, %p) called\n", data, size, nmemb,
-			mcm);
+int my_lxd_api_container_exists(struct my_lxd_api* lxd_api,
+		const char* container_name, int* result_out) {
+	if (lxd_api == NULL || container_name == NULL || result_out == NULL) {
+		return -1;
+	}
 
-	size_t datalen = size * nmemb;
+	sds url = sdscatprintf(sdsempty(), "http://example.com/1.0/containers/%s",
+			container_name);
+	if (url == NULL) {
+		return -1;
+	}
 
-	char* oldmem = mcm->mem;
-	mcm->mem = realloc(mcm->mem, mcm->size + datalen + 1);
-	if (mcm->mem == NULL) {
-		fprintf(stderr, "my_curl_memory_write(): realloc() failed\n");
-		mcm->mem = oldmem;
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* check response code */
+	if (response_code == 404) {
+		*result_out = 0;
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
 		return 0;
 	}
 
-	memcpy((mcm->mem) + (mcm->size), data, datalen);
-	mcm->size += datalen;
-	/* make printing easier in case data is a string */
-	mcm->mem[mcm->size] = 0;
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
 
-	return datalen;
-}
-
-void my_curl_memory_clear(struct my_curl_memory* mcm) {
-	if (mcm == NULL) {
-		return;
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
 	}
 
-	free(mcm->mem);
-	mcm->mem = NULL;
-	mcm->size = 0;
-}
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
 
-void my_curl_memory_free(struct my_curl_memory* mcm) {
-	if (mcm == NULL) {
-		return;
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 200) {
+		fprintf(stderr, "status_code is not 200\n");
+
+		*result_out = 0;
+	} else {
+		*result_out = 1;
 	}
 
-	free(mcm->mem);
-	mcm->mem = NULL;
-	mcm->size = 0;
-
-	free(mcm);
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	return 0;
 }
-
-struct my_lxd_api* my_lxd_api_new(const char* lxd_unix_socket_path);
-
-int my_lxd_api_create_container(struct my_lxd_api* lxd_api,
-		const char* container_name, const char* source_image);
-
-void my_lxd_api_create_snapshot();
-
-void my_lxd_api_power_container();
-
-void my_lxd_delete_container();
-
-int my_lxd_api_get_container_ip(struct my_lxd_api* lxd_api,
-		const char* container_name, const char* nic_name, int is_ipv6,
-		uint8_t ip_addr_out[16]);
-
-void my_lxd_api_free(struct my_lxd_api* lxd_api);
-
-/* */
 
 struct my_lxd_api* my_lxd_api_new(const char* lxd_unix_socket_path) {
 	struct my_lxd_api* mla = malloc(sizeof(struct my_lxd_api));
@@ -151,8 +238,8 @@ struct my_lxd_api* my_lxd_api_new(const char* lxd_unix_socket_path) {
 
 //curl -s --unix-socket /var/lib/lxd/unix.socket -X POST -d '{"name": "xenial", "source": {"type": "image", "alias": "16.04"}}' a/1.0/containers
 int my_lxd_api_create_container(struct my_lxd_api* lxd_api,
-		const char* container_name, const char* source_image) {
-	if (lxd_api == NULL || container_name == NULL || source_image == NULL) {
+		const char* container_name, const char* source_image_alias) {
+	if (lxd_api == NULL || container_name == NULL || source_image_alias == NULL) {
 		return -1;
 	}
 
@@ -161,7 +248,7 @@ int my_lxd_api_create_container(struct my_lxd_api* lxd_api,
 	sds req =
 			sdscatprintf(sdsempty(),
 					"{\"name\": \"%s\", \"source\": {\"type\": \"image\", \"alias\": \"%s\"}}",
-					container_name, source_image);
+					container_name, source_image_alias);
 	if (req == NULL) {
 		return -1;
 	}
@@ -179,6 +266,8 @@ int my_lxd_api_create_container(struct my_lxd_api* lxd_api,
 	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, req);
 
 	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, NULL);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POST, 0);
 	if (cret != CURLE_OK) {
 		pthread_mutex_unlock(&lxd_api->curl_lock);
 
@@ -206,8 +295,764 @@ int my_lxd_api_create_container(struct my_lxd_api* lxd_api,
 	fprintf(stderr, "Response code: %ld\n", response_code);
 	fprintf(stderr, "Data: \n%s\n", mcm->mem);
 
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(req);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 100) {
+		fprintf(stderr, "status_code is not 100\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* get operation */
+	json_t* joperation = json_object_get(jroot, "operation");
+	if (joperation == NULL) {
+		fprintf(stderr, "failed to get operation\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* wait for operation to complete */
+	if (my_lxd_api_wait_operation(lxd_api, json_string_value(joperation)) < 0) {
+		fprintf(stderr, "failed to wait for operation to complete\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(req);
+		return -1;
+	}
+
+	json_decref(jroot);
 	my_curl_memory_free(mcm);
 	sdsfree(req);
+	return 0;
+}
+
+int my_lxd_api_snapshot_exists(struct my_lxd_api* lxd_api,
+		const char* container_name, const char* snapshot_name, int* result_out) {
+	if (lxd_api == NULL || container_name == NULL || snapshot_name == NULL
+			|| result_out == NULL) {
+		return -1;
+	}
+
+	sds url = sdscatprintf(sdsempty(),
+			"http://example.com/1.0/containers/%s/snapshots/%s", container_name,
+			snapshot_name);
+	if (url == NULL) {
+		return -1;
+	}
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* check response code */
+	if (response_code == 404) {
+		*result_out = 0;
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return 0;
+	}
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 200) {
+		fprintf(stderr, "status_code is not 200\n");
+
+		*result_out = 0;
+	} else {
+		*result_out = 1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	return 0;
+}
+
+int my_lxd_api_create_snapshot(struct my_lxd_api* lxd_api,
+		const char* container_name, const char* snapshot_name) {
+	if (lxd_api == NULL || container_name == NULL || snapshot_name == NULL) {
+		return -1;
+	}
+
+	sds url = sdscatprintf(sdsempty(),
+			"http://example.com/1.0/containers/%s/snapshots", container_name);
+	if (url == NULL) {
+		return -1;
+	}
+
+	sds req = sdscatprintf(sdsempty(), "{\"name\": \"%s\"}", snapshot_name);
+	if (req == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+		sdsfree(req);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, req);
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, NULL);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POST, 0);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 100) {
+		fprintf(stderr, "status_code is not 100\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* get operation */
+	json_t* joperation = json_object_get(jroot, "operation");
+	if (joperation == NULL) {
+		fprintf(stderr, "failed to get operation\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* wait for operation to complete */
+	if (my_lxd_api_wait_operation(lxd_api, json_string_value(joperation)) < 0) {
+		fprintf(stderr, "failed to wait for operation to complete\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	sdsfree(req);
+	return 0;
+}
+
+int my_lxd_api_restore_snapshot(struct my_lxd_api* lxd_api,
+		const char* container_name, const char* snapshot_name) {
+	if (lxd_api == NULL || container_name == NULL || snapshot_name == NULL) {
+		return -1;
+	}
+
+	sds url = sdscatprintf(sdsempty(), "http://example.com/1.0/containers/%s",
+			container_name);
+	if (url == NULL) {
+		return -1;
+	}
+
+	sds req = sdscatprintf(sdsempty(), "{\"restore\": \"%s\"}", snapshot_name);
+	if (req == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+		sdsfree(req);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, req);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, NULL);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POST, 0);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, NULL);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 100) {
+		fprintf(stderr, "status_code is not 100\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* get operation */
+	json_t* joperation = json_object_get(jroot, "operation");
+	if (joperation == NULL) {
+		fprintf(stderr, "failed to get operation\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	/* wait for operation to complete */
+	if (my_lxd_api_wait_operation(lxd_api, json_string_value(joperation)) < 0) {
+		fprintf(stderr, "failed to wait for operation to complete\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		sdsfree(req);
+		return -1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	sdsfree(req);
+	return 0;
+}
+
+int my_lxd_api_delete_snapshot(struct my_lxd_api* lxd_api,
+		const char* container_name, const char* snapshot_name) {
+	if (lxd_api == NULL || container_name == NULL || snapshot_name == NULL) {
+		return -1;
+	}
+
+	sds url = sdscatprintf(sdsempty(),
+			"http://example.com/1.0/containers/%s/snapshots/%s", container_name,
+			snapshot_name);
+	if (url == NULL) {
+		return -1;
+	}
+
+	const char* req = "{}";
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, req);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, NULL);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POST, 0);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, NULL);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 100) {
+		fprintf(stderr, "status_code is not 100\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* get operation */
+	json_t* joperation = json_object_get(jroot, "operation");
+	if (joperation == NULL) {
+		fprintf(stderr, "failed to get operation\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* wait for operation to complete */
+	if (my_lxd_api_wait_operation(lxd_api, json_string_value(joperation)) < 0) {
+		fprintf(stderr, "failed to wait for operation to complete\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	return 0;
+}
+
+int my_lxd_api_power_container(struct my_lxd_api* lxd_api,
+		const char* container_name, int on_off) {
+	if (lxd_api == NULL || container_name == NULL) {
+		return -1;
+	}
+
+	sds url = sdscatprintf(sdsempty(),
+			"http://example.com/1.0/containers/%s/state", container_name);
+	if (url == NULL) {
+		return -1;
+	}
+
+	const char* req = NULL;
+	if (on_off) {
+		req = "{\"action\": \"start\", \"force\": true}";
+	} else {
+		req = "{\"action\": \"stop\", \"force\": true}";
+	}
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, req);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, NULL);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POST, 0);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, NULL);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 100) {
+		fprintf(stderr, "status_code is not 100\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* get operation */
+	json_t* joperation = json_object_get(jroot, "operation");
+	if (joperation == NULL) {
+		fprintf(stderr, "failed to get operation\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* wait for operation to complete */
+	if (my_lxd_api_wait_operation(lxd_api, json_string_value(joperation)) < 0) {
+		fprintf(stderr, "failed to wait for operation to complete\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
+	return 0;
+}
+
+int my_lxd_api_delete_container(struct my_lxd_api* lxd_api,
+		const char* container_name) {
+	if (lxd_api == NULL || container_name == NULL) {
+		return -1;
+	}
+
+	sds url = sdscatprintf(sdsempty(), "http://example.com/1.0/containers/%s",
+			container_name);
+	if (url == NULL) {
+		return -1;
+	}
+
+	const char* req = "{}";
+
+	struct my_curl_memory* mcm = my_curl_memory_new();
+	if (mcm == NULL) {
+		sdsfree(url);
+
+		return -1;
+	}
+
+	pthread_mutex_lock(&lxd_api->curl_lock);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_URL, url);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_WRITEDATA, mcm);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, req);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+	CURLcode cret = curl_easy_perform(lxd_api->curl);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POSTFIELDS, NULL);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_POST, 0);
+	curl_easy_setopt(lxd_api->curl, CURLOPT_CUSTOMREQUEST, NULL);
+	if (cret != CURLE_OK) {
+		pthread_mutex_unlock(&lxd_api->curl_lock);
+
+		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	long response_code;
+	cret = curl_easy_getinfo(lxd_api->curl, CURLINFO_RESPONSE_CODE,
+			&response_code);
+	pthread_mutex_unlock(&lxd_api->curl_lock);
+	if (cret != CURLE_OK) {
+		fprintf(stderr, "curl_easy_getinfo() failed: %s\n",
+				curl_easy_strerror(cret));
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	fprintf(stderr, "Response code: %ld\n", response_code);
+	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+
+	/* parse JSON */
+	json_error_t jerror;
+	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
+	if (jroot == NULL) {
+		fprintf(stderr, "error: on line %d: %s\n", jerror.line, jerror.text);
+
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* check status code */
+	json_t* jstatus = json_object_get(jroot, "status_code");
+	if (jstatus == NULL) {
+		fprintf(stderr, "failed to get status_code\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+	if (json_integer_value(jstatus) != 100) {
+		fprintf(stderr, "status_code is not 100\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* get operation */
+	json_t* joperation = json_object_get(jroot, "operation");
+	if (joperation == NULL) {
+		fprintf(stderr, "failed to get operation\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	/* wait for operation to complete */
+	if (my_lxd_api_wait_operation(lxd_api, json_string_value(joperation)) < 0) {
+		fprintf(stderr, "failed to wait for operation to complete\n");
+
+		json_decref(jroot);
+		my_curl_memory_free(mcm);
+		sdsfree(url);
+		return -1;
+	}
+
+	json_decref(jroot);
+	my_curl_memory_free(mcm);
+	sdsfree(url);
 	return 0;
 }
 
@@ -264,8 +1109,7 @@ int my_lxd_api_get_container_ip(struct my_lxd_api* lxd_api,
 	fprintf(stderr, "Response code: %ld\n", response_code);
 	fprintf(stderr, "Data: \n%s\n", mcm->mem);
 
-	/* get the IP address of the container */
-
+	/* parse JSON */
 	json_error_t jerror;
 	json_t* jroot = json_loads(mcm->mem, 0, &jerror);
 	if (jroot == NULL) {
@@ -276,6 +1120,7 @@ int my_lxd_api_get_container_ip(struct my_lxd_api* lxd_api,
 		return -1;
 	}
 
+	/* get the IP address of the container */
 	json_t* jmetadata = json_object_get(jroot, "metadata");
 	if (jmetadata == NULL) {
 		fprintf(stderr, "failed to get metadata\n");
@@ -436,8 +1281,27 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	if (argc < 4) {
-		fprintf(stderr, "Usage: %s <container name> <nic name> <is ipv6>\n",
+	if (argc < 3) {
+		fprintf(stderr,
+				"Usage: %s getip <container name> <nic name> <is ipv6>\n",
+				argv[0]);
+		fprintf(stderr, "       %s create <container name> <image name>\n",
+				argv[0]);
+		fprintf(stderr, "       %s power <container name> <on off>\n", argv[0]);
+		fprintf(stderr,
+				"       %s snapshot_create <container name> <snapshot name>\n",
+				argv[0]);
+		fprintf(stderr, "       %s container_exists <container name>\n",
+				argv[0]);
+		fprintf(stderr,
+				"       %s snapshot_exists <container name> <snapshot name>\n",
+				argv[0]);
+		fprintf(stderr, "       %s delete <container name>\n", argv[0]);
+		fprintf(stderr,
+				"       %s snapshot_restore <container name> <snapshot name>\n",
+				argv[0]);
+		fprintf(stderr,
+				"       %s snapshot_delete <container name> <snapshot name>\n",
 				argv[0]);
 
 		return 1;
@@ -450,25 +1314,75 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	int is_ipv6 = strcmp("0", argv[3]);
+	if (strcmp("getip", argv[1]) == 0 && argc == 5) {
 
-	uint8_t addr[16] = { 0 };
-	int ret = my_lxd_api_get_container_ip(mla, argv[1], argv[2], is_ipv6, addr);
-	printf("my_lxd_api_get_container_ip() returned %d\n", ret);
+		int is_ipv6 = strcmp("0", argv[4]);
 
-	putchar('\n');
-	for (int i = 0; i < 16; i++) {
-		printf("%u ", addr[i]);
-	}
-	putchar('\n');
-	for (int i = 0; i < 16; i++) {
-		printf("%02x ", addr[i]);
-	}
-	putchar('\n');
+		uint8_t addr[16] = { 0 };
+		int ret = my_lxd_api_get_container_ip(mla, argv[2], argv[3], is_ipv6,
+				addr);
+		printf("my_lxd_api_get_container_ip() returned %d\n", ret);
 
-	if (argc >= 6) {
-		ret = my_lxd_api_create_container(mla, argv[4], argv[5]);
+		putchar('\n');
+		for (int i = 0; i < 16; i++) {
+			printf("%u ", addr[i]);
+		}
+		putchar('\n');
+		for (int i = 0; i < 16; i++) {
+			printf("%02x ", addr[i]);
+		}
+		putchar('\n');
+
+	} else if (strcmp("create", argv[1]) == 0 && argc == 4) {
+
+		int ret = my_lxd_api_create_container(mla, argv[2], argv[3]);
 		printf("my_lxd_api_create_container() returned %d\n", ret);
+
+	} else if (strcmp("power", argv[1]) == 0 && argc == 4) {
+
+		int on_off = strcmp("0", argv[3]);
+
+		int ret = my_lxd_api_power_container(mla, argv[2], on_off);
+		printf("my_lxd_api_power_container() returned %d\n", ret);
+
+	} else if (strcmp("snapshot_create", argv[1]) == 0 && argc == 4) {
+
+		int ret = my_lxd_api_create_snapshot(mla, argv[2], argv[3]);
+		printf("my_lxd_api_create_snapshot() returned %d\n", ret);
+
+	} else if (strcmp("container_exists", argv[1]) == 0 && argc == 3) {
+
+		int result = -1;
+		int ret = my_lxd_api_container_exists(mla, argv[2], &result);
+		printf("my_lxd_api_container_exists() returned %d\n", ret);
+		printf("result: %d\n", result);
+
+	} else if (strcmp("snapshot_exists", argv[1]) == 0 && argc == 4) {
+
+		int result = -1;
+		int ret = my_lxd_api_snapshot_exists(mla, argv[2], argv[3], &result);
+		printf("my_lxd_api_snapshot_exists() returned %d\n", ret);
+		printf("result: %d\n", result);
+
+	} else if (strcmp("delete", argv[1]) == 0 && argc == 3) {
+
+		int ret = my_lxd_api_delete_container(mla, argv[2]);
+		printf("my_lxd_api_delete_container() returned %d\n", ret);
+
+	} else if (strcmp("snapshot_restore", argv[1]) == 0 && argc == 4) {
+
+		int ret = my_lxd_api_restore_snapshot(mla, argv[2], argv[3]);
+		printf("my_lxd_api_restore_snapshot() returned %d\n", ret);
+
+	} else if (strcmp("snapshot_delete", argv[1]) == 0 && argc == 4) {
+
+		int ret = my_lxd_api_delete_snapshot(mla, argv[2], argv[3]);
+		printf("my_lxd_api_delete_snapshot() returned %d\n", ret);
+
+	} else {
+
+		fprintf(stderr, "Invalid command\n");
+
 	}
 
 	my_lxd_api_free(mla);
