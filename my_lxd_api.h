@@ -28,9 +28,6 @@ struct my_lxd_api {
 
 struct my_lxd_api* my_lxd_api_new(const char* lxd_unix_socket_path);
 
-static int my_lxd_api_wait_operation(struct my_lxd_api* lxd_api,
-		const char* operation_uri);
-
 int my_lxd_api_container_exists(struct my_lxd_api* lxd_api,
 		const char* container_name, int* result_out);
 

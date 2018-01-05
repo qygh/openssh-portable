@@ -1276,6 +1276,7 @@ void my_lxd_api_free(struct my_lxd_api* lxd_api) {
 	free(lxd_api);
 }
 
+/*
 int main(int argc, char* argv[]) {
 	if (argc < 1) {
 		return 1;
@@ -1388,3 +1389,4 @@ int main(int argc, char* argv[]) {
 	my_lxd_api_free(mla);
 	return 0;
 }
+*/
