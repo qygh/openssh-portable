@@ -5,45 +5,7 @@
  *      Author: lqy
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <pthread.h>
-
-#include "my_lxd_api.h"
-
-//gcc -g -O3 -Wall -Wextra my_vm_pool.c my_lxd_api.c my_curl_memory.c sds.c -lcurl -ljansson -lpthread -o my_vm_pool
-
-enum my_vm_state {
-	invalid,
-	uncompromised_idle,
-	uncompromised_connected,
-	compromised_connected,
-	compromised_idle,
-	reinstalling
-};
-
-struct my_vm_instance {
-	uint32_t id;
-	uint32_t conn_count;
-	uint8_t client_ip_addr[16];
-	enum my_vm_state vm_state;
-	time_t last_disconn;
-	pthread_rwlock_t lock;
-};
-
-struct my_vm_pool {
-	uint32_t pool_size;
-	char* base_image_name;
-	char* base_snapshot_name;
-	char* vm_name_prefix;
-	char* vm_nic_name;
-	time_t idle_timeout;
-	struct my_vm_instance* pool;
-	struct my_lxd_api* lxd_api;
-};
+#include "my_vm_pool.h"
 
 static int is_ip_ipv6(uint8_t ip_addr[16]) {
 	int zero_x_10 = 0;
@@ -73,25 +35,6 @@ static int is_ip_ipv6(uint8_t ip_addr[16]) {
 static int is_ip_same(uint8_t ip_addr_l[16], uint8_t ip_addr_r[16]) {
 	return memcmp(ip_addr_l, ip_addr_r, 16) == 0;
 }
-
-struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
-		const char* base_image_name, const char* base_snapshot_name,
-		const char* vm_name_prefix, const char* vm_nic_name,
-		time_t idle_timeout);
-
-int my_vm_pool_request(struct my_vm_pool* vm_pool, uint8_t client_ip_addr[16],
-		uint32_t* vm_id_out);
-
-int my_vm_pool_release(struct my_vm_pool* vm_pool, uint32_t vm_id);
-
-int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, uint32_t vm_id,
-		const char* nic_name, uint8_t vm_ip_addr_out[16]);
-
-int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool);
-
-int my_vm_pool_set_compromised(struct my_vm_pool* vm_pool, uint32_t vm_id);
-
-void my_vm_pool_free(struct my_vm_pool* vm_pool, int delete_vm);
 
 struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 		const char* base_image_name, const char* base_snapshot_name,
@@ -598,26 +541,3 @@ void my_vm_pool_free(struct my_vm_pool* vm_pool, int delete_vm) {
 	my_lxd_api_free(vm_pool->lxd_api);
 }
 
-int main(int argc, char* argv[]) {
-	if (argc < 1) {
-		return 1;
-	}
-
-	if (argc < 7) {
-		printf(
-				"Usage: %s <pool_size> <base_image_name> <base_snapshot_name> <vm_name_prefix> <vm_nic_name> <idle_timeout>\n",
-				argv[0]);
-		return 1;
-	}
-
-	struct my_vm_pool* mvp = my_vm_pool_new(strtol(argv[1], NULL, 10), argv[2],
-			argv[3], argv[4], argv[5], strtol(argv[6], NULL, 10));
-	if (mvp == NULL) {
-		fprintf(stderr, "my_vm_pool_new() failed\n");
-		return 1;
-	}
-
-	printf("my_vm_pool_new() returned %p\n", mvp);
-
-	return 0;
-}
