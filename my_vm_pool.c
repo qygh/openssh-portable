@@ -100,6 +100,7 @@ struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 	}
 
 	/* initialise VMs */
+	/* It will take a long time */
 	for (uint32_t i = 0; i < mvp->pool_size; i++) {
 		mvp->pool[i].id = i;
 		mvp->pool[i].conn_count = 0;
@@ -425,6 +426,9 @@ int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool) {
 					pthread_rwlock_unlock(&(vm_pool->pool[i].lock));
 					continue;
 				}
+
+				/* always power off the VM */
+				my_lxd_api_power_container(vm_pool->lxd_api, vm_name, 0);
 
 				int ret = my_lxd_api_create_snapshot(vm_pool->lxd_api, vm_name,
 						snapshot_name);

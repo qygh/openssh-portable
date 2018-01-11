@@ -42,6 +42,8 @@ ssize_t fd_read_full(int in_fd, u_char* buffer, size_t len);
 
 ssize_t fd_write_full(int out_fd, const u_char* buffer, size_t len);
 
+void print_ssh_message_type(unsigned char type);
+
 struct ssh_forwarder_thread_arg {
 	char* ssh_private_key_path;
 	int real_client_fd;
@@ -315,6 +317,7 @@ void* ssh_forwarder(void* arg) {
 					printf(
 							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
 							ret, type, data, len);
+					print_ssh_message_type(type);
 					if (ret < 0) {
 						printf("ssh_read() failed\n");
 						ssh_flush(ssh_s, ufds[0].fd);
@@ -406,6 +409,7 @@ void* ssh_forwarder(void* arg) {
 					printf(
 							"ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
 							ret, type, data, len);
+					print_ssh_message_type(type);
 					if (ret < 0) {
 						printf("ssh_read() failed\n");
 						ssh_flush(ssh_s, ufds[0].fd);
@@ -647,6 +651,7 @@ void* ssh_decoder_c(void* arg) {
 					printf(
 							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
 							ret, type, data, len);
+					print_ssh_message_type(type);
 					if (ret < 0) {
 						printf("ssh_read() failed\n");
 						ssh_flush(ssh_s, ufds[0].fd);
@@ -969,6 +974,7 @@ void* ssh_decoder_s(void* arg) {
 					printf(
 							"ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
 							ret, type, data, len);
+					print_ssh_message_type(type);
 					if (ret < 0) {
 						printf("ssh_read() failed\n");
 						should_loop = 0;
@@ -1602,4 +1608,208 @@ ssize_t fd_write_full(int out_fd, const u_char* buffer, size_t len) {
 	}
 
 	return bytes_sent;
+}
+
+void print_ssh_message_type(unsigned char type) {
+	char* msg_type = NULL;
+
+	switch (type) {
+	case 0:
+		msg_type = "SSH_MSG_NONE";
+		break;
+	case 1:
+		msg_type = "SSH_MSG_DISCONNECT";
+		break;
+	case 2:
+		msg_type = "SSH_MSG_IGNORE | SSH_SMSG_PUBLIC_KEY";
+		break;
+	case 3:
+		msg_type = "SSH_MSG_UNIMPLEMENTED | SSH_CMSG_SESSION_KEY";
+		break;
+	case 4:
+		msg_type = "SSH_MSG_DEBUG | SSH_CMSG_USER";
+		break;
+	case 5:
+		msg_type = "SSH_MSG_SERVICE_REQUEST | SSH_CMSG_AUTH_RHOSTS";
+		break;
+	case 6:
+		msg_type = "SSH_MSG_SERVICE_ACCEPT | SSH_CMSG_AUTH_RSA";
+		break;
+	case 7:
+		msg_type = "SSH_SMSG_AUTH_RSA_CHALLENGE";
+		break;
+	case 8:
+		msg_type = "SSH_CMSG_AUTH_RSA_RESPONSE";
+		break;
+	case 9:
+		msg_type = "SSH_CMSG_AUTH_PASSWORD";
+		break;
+	case 10:
+		msg_type = "SSH_CMSG_REQUEST_PTY";
+		break;
+	case 11:
+		msg_type = "SSH_CMSG_WINDOW_SIZE";
+		break;
+	case 12:
+		msg_type = "SSH_CMSG_EXEC_SHELL";
+		break;
+	case 13:
+		msg_type = "SSH_CMSG_EXEC_CMD";
+		break;
+	case 14:
+		msg_type = "SSH_SMSG_SUCCESS";
+		break;
+	case 15:
+		msg_type = "SSH_SMSG_FAILURE";
+		break;
+	case 16:
+		msg_type = "SSH_CMSG_STDIN_DATA";
+		break;
+	case 17:
+		msg_type = "SSH_SMSG_STDOUT_DATA";
+		break;
+	case 18:
+		msg_type = "SSH_SMSG_STDERR_DATA";
+		break;
+	case 19:
+		msg_type = "SSH_CMSG_EOF";
+		break;
+	case 20:
+		msg_type = "SSH_MSG_KEXINIT | SSH_SMSG_EXITSTATUS";
+		break;
+	case 21:
+		msg_type = "SSH_MSG_NEWKEYS | SSH_MSG_CHANNEL_OPEN_CONFIRMATION";
+		break;
+	case 22:
+		msg_type = "SSH_MSG_CHANNEL_OPEN_FAILURE";
+		break;
+	case 23:
+		msg_type = "SSH_MSG_CHANNEL_DATA";
+		break;
+	case 24:
+		msg_type = "SSH_MSG_CHANNEL_CLOSE";
+		break;
+	case 25:
+		msg_type = "SSH_MSG_CHANNEL_CLOSE_CONFIRMATION";
+		break;
+	case 26:
+		msg_type = "SSH_CMSG_X11_REQUEST_FORWARDING";
+		break;
+	case 27:
+		msg_type = "SSH_SMSG_X11_OPEN";
+		break;
+	case 28:
+		msg_type = "SSH_CMSG_PORT_FORWARD_REQUEST";
+		break;
+	case 29:
+		msg_type = "SSH_MSG_PORT_OPEN";
+		break;
+	case 30:
+		msg_type = "SSH_CMSG_AGENT_REQUEST_FORWARDING";
+		break;
+	case 31:
+		msg_type = "SSH_SMSG_AGENT_OPEN";
+		break;
+	case 32:
+		msg_type = "SSH_MSG_IGNORE";
+		break;
+	case 33:
+		msg_type = "SSH_CMSG_EXIT_CONFIRMATION";
+		break;
+	case 34:
+		msg_type = "SSH_CMSG_X11_REQUEST_FORWARDING";
+		break;
+	case 35:
+		msg_type = "SSH_CMSG_AUTH_RHOSTS_RSA";
+		break;
+	case 36:
+		msg_type = "SSH_MSG_DEBUG";
+		break;
+	case 37:
+		msg_type = "SSH_CMSG_REQUEST_COMPRESSION";
+		break;
+	case 38:
+		msg_type = "SSH_CMSG_MAX_PACKET_SIZE";
+		break;
+	case 39:
+		msg_type = "SSH_CMSG_AUTH_TIS";
+		break;
+	case 40:
+		msg_type = "SSH_SMSG_AUTH_TIS_CHALLENGE";
+		break;
+	case 41:
+		msg_type = "SSH_CMSG_AUTH_TIS_RESPONSE";
+		break;
+	case 42:
+		msg_type = "SSH_CMSG_AUTH_KERBEROS";
+		break;
+	case 43:
+		msg_type = "SSH_SMSG_AUTH_KERBEROS_RESPONSE";
+		break;
+	case 44:
+		msg_type = "SSH_CMSG_HAVE_KERBEROS_TGT";
+		break;
+	case 50:
+		msg_type = "SSH_MSG_USERAUTH_REQUEST";
+		break;
+	case 51:
+		msg_type = "SSH_MSG_USERAUTH_FAILURE";
+		break;
+	case 52:
+		msg_type = "SSH_MSG_USERAUTH_SUCCESS";
+		break;
+	case 53:
+		msg_type = "SSH_MSG_USERAUTH_BANNER";
+		break;
+	case 65:
+		msg_type = "SSH_CMSG_HAVE_AFS_TOKEN";
+		break;
+	case 80:
+		msg_type = "SSH_MSG_GLOBAL_REQUEST";
+		break;
+	case 81:
+		msg_type = "SSH_MSG_REQUEST_SUCCESS";
+		break;
+	case 82:
+		msg_type = "SSH_MSG_REQUEST_FAILURE";
+		break;
+	case 90:
+		msg_type = "SSH_MSG_CHANNEL_OPEN";
+		break;
+	case 91:
+		msg_type = "SSH_MSG_CHANNEL_OPEN_CONFIRMATION";
+		break;
+	case 92:
+		msg_type = "SSH_MSG_CHANNEL_OPEN_FAILURE";
+		break;
+	case 93:
+		msg_type = "SSH_MSG_CHANNEL_WINDOW_ADJUST";
+		break;
+	case 94:
+		msg_type = "SSH_MSG_CHANNEL_DATA";
+		break;
+	case 95:
+		msg_type = "SSH_MSG_CHANNEL_EXTENDED_DATA";
+		break;
+	case 96:
+		msg_type = "SSH_MSG_CHANNEL_EOF";
+		break;
+	case 97:
+		msg_type = "SSH_MSG_CHANNEL_CLOSE";
+		break;
+	case 98:
+		msg_type = "SSH_MSG_CHANNEL_REQUEST";
+		break;
+	case 99:
+		msg_type = "SSH_MSG_CHANNEL_SUCCESS";
+		break;
+	case 100:
+		msg_type = "SSH_MSG_CHANNEL_FAILURE";
+		break;
+	default:
+		msg_type = "SSH message type unknown";
+		break;
+	}
+
+	printf("message type is %u: %s\n", type, msg_type);
 }
