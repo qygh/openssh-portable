@@ -243,6 +243,7 @@ void* ssh_forwarder(void* arg) {
 		ssh_flush(ssh_c, ufds[1].fd);
 	}
 
+	int auth_success = 0;
 	while (1) {
 		ret = poll(ufds, 2, -1);
 
@@ -324,9 +325,7 @@ void* ssh_forwarder(void* arg) {
 						should_loop = 0;
 						break;
 					}
-					if (type == 90) {
-						printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
-					} else if (type == 0) {
+					if (type == 0) {
 						printf("\n\nSSH_MSG_NONE\n\n");
 
 						ret = ssh_flush(ssh_s, ufds[0].fd);
@@ -416,8 +415,8 @@ void* ssh_forwarder(void* arg) {
 						should_loop = 0;
 						break;
 					}
-					if (type == 90) {
-						printf("\n\nSSH_MSG_CHANNEL_OPEN\n\n");
+					if (type == 52) {
+						auth_success = 1;
 					} else if (type == 0) {
 						printf("\n\nSSH_MSG_NONE\n\n");
 
@@ -474,6 +473,12 @@ void* ssh_forwarder(void* arg) {
 				printf("\n++++++++++++++++++\n");
 			}
 		}
+	}
+
+	if (auth_success) {
+		printf("Login succeeded\n");
+	} else {
+		printf("Login failed\n");
 	}
 
 	ssh_free(ssh_c);
