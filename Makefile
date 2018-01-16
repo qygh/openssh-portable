@@ -165,6 +165,9 @@ libssh.a: $(LIBSSH_OBJS)
 
 my_ssh_test$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYSSHTESTOBJS)
 	$(LD) -o $@ $(MYSSHTESTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
+	
+my_ssh_api$(EXEEXT): libssh.a	$(LIBCOMPAT) my_ssh_api.o
+	$(LD) -o $@ my_ssh_api.o $(LDFLAGS) -lssh -lopenbsd-compat -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 
 ssh$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHOBJS)
 	$(LD) -o $@ $(SSHOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHLIBS) $(LIBS) $(GSSLIBS)

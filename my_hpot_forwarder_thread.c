@@ -18,12 +18,14 @@
 #include <errno.h>
 #include <stdint.h>
 
-#include "ssh_api.h"
+#include "my_ssh_api.h"
+#include "my_vm_pool.h"
 
 struct ssh_forwarder_thread_arg {
 	char* ssh_private_key_path;
 	int real_client_fd;
-	char* server_hostname;
+	struct my_vm_pool* vm_pool;
+	//char* server_hostname;
 	char* server_port;
 	pthread_barrier_t* barrier;
 };
@@ -52,6 +54,14 @@ void* ssh_forwarder(void* arg) {
 	struct ssh* ssh_s = NULL;
 	struct sshkey* sshkey = NULL;
 	struct ssh* ssh_c = NULL;
+
+	/* TODO request a VM from the VM pool */
+
+	/* TODO error handling when VM is unavailable, fail to get IP address of VM or fail to establish TCP connection to VM */
+
+	/* TODO implement a fake SSH server that never authenticates in error cases above */
+
+	/* TODO implement actual logging */
 
 	real_server_fd = create_tcp_client_socket(args->server_hostname,
 			args->server_port);
@@ -410,6 +420,9 @@ void* ssh_forwarder(void* arg) {
 		}
 	}
 
+	/* TODO release the VM */
+
+	/* TODO SSH still causes memory leak */
 	ssh_free(ssh_c);
 	sshkey_free(sshkey);
 	ssh_free(ssh_s);
