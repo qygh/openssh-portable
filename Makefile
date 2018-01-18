@@ -96,6 +96,9 @@ LIBSSH_OBJS=${LIBOPENSSH_OBJS} \
 
 MYSSHTESTOBJS=${LIBOPENSSH_OBJS} \
 	my_ssh_test.o
+	
+MYHPOTOBJS=${LIBOPENSSH_OBJS} \
+	my_hpot_main.o my_hpot_forwarder_thread.o my_lxd_api.o my_ssh_api.o my_vm_pool.o my_curl_memory.o sds.o
 
 SSHOBJS= ssh.o readconf.o clientloop.o sshtty.o \
 	sshconnect.o sshconnect2.o mux.o
@@ -166,8 +169,8 @@ libssh.a: $(LIBSSH_OBJS)
 my_ssh_test$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYSSHTESTOBJS)
 	$(LD) -o $@ $(MYSSHTESTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 	
-my_ssh_api$(EXEEXT): libssh.a	$(LIBCOMPAT) my_ssh_api.o
-	$(LD) -o $@ my_ssh_api.o $(LDFLAGS) -lssh -lopenbsd-compat -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
+my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS)
+	$(LD) -o $@ $(MYHPOTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lcurl -ljansson -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 
 ssh$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHOBJS)
 	$(LD) -o $@ $(SSHOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHLIBS) $(LIBS) $(GSSLIBS)

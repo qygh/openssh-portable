@@ -103,7 +103,3 @@ ssize_t ssh_flush(struct ssh* ssh, int out_fd, int* errno_out) {
 
 	return bytes_sent;
 }
-
-int main() {
-	return 0;
-}
