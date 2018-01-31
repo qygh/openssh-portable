@@ -39,11 +39,23 @@ void* ssh_forwarder(void* arg) {
 	/* get client IP */
 	struct sockaddr_in6 client_sa = { 0 };
 	socklen_t client_sa_len = sizeof(client_sa);
-	ret = getpeername(args->real_client_fd, &client_sa, &client_sa_len);
+	ret = getpeername(args->real_client_fd, (struct sockaddr*) &client_sa,
+			&client_sa_len);
 	if (ret < 0) {
 		fprintf(stderr, "getpeername() failed\n");
 		//TODO error handling
 		return NULL;
+	} else {
+		printf("getpeername() returned %d, client IP:\n", ret);
+		uint8_t* addr = &(client_sa.sin6_addr);
+		for (int i = 0; i < 16; i++) {
+			printf("%u ", addr[i]);
+		}
+		putchar('\n');
+		for (int i = 0; i < 16; i++) {
+			printf("%02x ", addr[i]);
+		}
+		putchar('\n');
 	}
 
 	/* TODO request a VM from the VM pool */
@@ -65,13 +77,46 @@ void* ssh_forwarder(void* arg) {
 		fprintf(stderr, "my_vm_pool_get_vm_ip() failed\n");
 		//TODO error handling
 		return NULL;
+	} else {
+		printf("my_vm_pool_get_vm_ip() returned %d, VM IP:\n", ret);
+		for (int i = 0; i < 16; i++) {
+			printf("%u ", vm_ip[i]);
+		}
+		putchar('\n');
+		for (int i = 0; i < 16; i++) {
+			printf("%02x ", vm_ip[i]);
+		}
+		putchar('\n');
 	}
 
 	/* TODO implement a fake SSH server that never authenticates in error cases above */
 
 	/* TODO implement actual logging */
+	char log_filename[50] = { 0 };
+	snprintf(log_filename, sizeof(log_filename), "log_%ld_%u",
+			(long) time(NULL), vm_id);
+	FILE* log_fp = fopen(log_filename, "a");
+	if (log_fp == NULL) {
+		//TODO error handling
+		fprintf(stderr, "fopen() failed\n");
+
+		return NULL;
+	}
+
+	/* write (time, client_ip, vm_ip, vm_id) to log */
+	fprintf(log_fp, "%ld,", (long) time(NULL));
+	for (int i = 0; i < 16; i++) {
+		fprintf(log_fp, "%02x", client_ip[i]);
+	}
+	fprintf(log_fp, ",");
+	for (int i = 0; i < 16; i++) {
+		fprintf(log_fp, "%02x", vm_ip[i]);
+	}
+	fprintf(log_fp, ",%u\n", vm_id);
+	fflush(log_fp);
 
 	struct sockaddr_in6 vm_sa = { 0 };
+	vm_sa.sin6_family = AF_INET6;
 	vm_sa.sin6_port = htons(22);
 	memcpy(&(vm_sa.sin6_addr), vm_ip, 16);
 	real_server_fd = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
@@ -84,13 +129,19 @@ void* ssh_forwarder(void* arg) {
 		//close(args->real_client_fd);
 		//pthread_exit(NULL);
 		return NULL;
+	} else {
+		printf("socket() returned %d\n", real_server_fd);
 	}
-	ret = connect(real_server_fd, &vm_sa, sizeof(vm_sa));
+	ret = connect(real_server_fd, (struct sockaddr*) &vm_sa, sizeof(vm_sa));
 	if (ret < 0) {
 		//TODO error handling
 		fprintf(stderr, "connect() failed\n");
 
 		return NULL;
+	} else {
+		printf("connect() returned %d\n", ret);
+		//char a[1000] = { 0 };
+		//read(real_server_fd, a, 1000);
 	}
 
 	/* ignore SIGPIPE that can be possibly caused by writes to disconnected sockets */
@@ -222,7 +273,7 @@ void* ssh_forwarder(void* arg) {
 		return NULL;
 	}
 
-	/* poll the two sockets */
+	/*poll the two sockets*/
 	struct pollfd ufds[2];
 	ufds[0].fd = args->real_client_fd;
 	ufds[0].events = POLLIN;
@@ -230,27 +281,64 @@ void* ssh_forwarder(void* arg) {
 	ufds[1].events = POLLIN;
 
 	{
-		/* required to get OpenSSH working */
 		u_char type = 0;
 		const u_char* data = NULL;
 		size_t len = 0;
+		//ssize_t ret = 0;
 		ssh_read(ssh_s, &type, &data, &len);
-		ssh_flush(ssh_s, ufds[0].fd, NULL);
+		ssh_flush(ssh_s, ufds[0].fd);
 		ssh_read(ssh_c, &type, &data, &len);
-		ssh_flush(ssh_c, ufds[1].fd, NULL);
+		ssh_flush(ssh_c, ufds[1].fd);
 	}
 
+	int auth_success = 0;
 	while (1) {
 		ret = poll(ufds, 2, -1);
 
 		if (ret < 0) {
 			fprintf(stderr, "poll() failed\n");
 		} else if (ret == 0) {
-			/* poll() timeout */
-		} else {
-			//printf("poll() returned %d\n", ret);
+			//fprintf(stderr, "poll() timeout\n");
+			/*ssize_t ret = ssh_flush(ssh_c, ufds[1].fd);
+			 if (ret > 0) {
+			 printf("ssh_flush(ssh_c) returned %zd\n", ret);
+			 } else if (ret < 0) {
+			 printf("ssh_flush(ssh_c) returned %zd\n", ret);
+			 }
 
-			/* client socket readable */
+			 ret = ssh_flush(ssh_s, ufds[0].fd);
+			 if (ret > 0) {
+			 printf("ssh_flush(ssh_s) returned %zd\n", ret);
+			 } else if (ret < 0) {
+			 printf("ssh_flush(ssh_s) returned %zd\n", ret);
+			 }*/
+
+			//read from in_fd and fill the SSH input byte stream
+			/*char buffer[8192];
+			 ssize_t sret = read(ufds[1].fd, buffer, sizeof(buffer));
+			 printf("ssh_read: read returned %zd\n", sret);
+			 if (sret > 0) {
+			 ret = ssh_input_append(ssh_c, buffer, sret);
+			 printf("ssh_read: ssh_input_append(%zd) returned %d\n", sret,
+			 ret);
+			 if (ret < 0) {
+			 printf("ssh_read: ssh_input_append error\n");
+			 }
+			 }
+
+			 sret = read(ufds[0].fd, buffer, sizeof(buffer));
+			 printf("ssh_read: read returned %zd\n", sret);
+			 if (sret > 0) {
+			 ret = ssh_input_append(ssh_s, buffer, sret);
+			 printf("ssh_read: ssh_input_append(%zd) returned %d\n", sret,
+			 ret);
+			 if (ret < 0) {
+			 printf("ssh_read: ssh_input_append error\n");
+			 }
+			 }*/
+		} else {
+			printf("poll() returned %d\n", ret);
+
 			if (ufds[0].revents & POLLIN) {
 				printf("\n------------------\n");
 
@@ -261,19 +349,15 @@ void* ssh_forwarder(void* arg) {
 				size_t len = 0;
 				ssize_t ret = 0;
 
-				int errn = 0;
-				ret = ssh_fill(ssh_s, ufds[0].fd, &errn);
-				//printf("ssh_fill(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
+				ret = ssh_fill(ssh_s, ufds[0].fd);
+				printf("ssh_fill(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
 				if (ret < 0) {
-					if (errn == EWOULDBLOCK || errn == EAGAIN) {
+					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
 						printf("ssh_fill() would block\n");
 					} else {
-						fprintf(stderr, "ssh_fill() failed\n");
+						printf("ssh_fill() failed\n");
 						break;
 					}
-				} else if (ret == 0) {
-					fprintf(stderr, "ssh_fill() EOF\n");
-					break;
 				}
 
 				u_char should_loop = 1;
@@ -282,26 +366,27 @@ void* ssh_forwarder(void* arg) {
 					printf(
 							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
 							ret, type, data, len);
+					print_ssh_message_type(type);
 					if (ret < 0) {
-						fprintf(stderr, "ssh_read() failed\n");
-						ssh_flush(ssh_s, ufds[0].fd, NULL);
+						printf("ssh_read() failed\n");
+						ssh_flush(ssh_s, ufds[0].fd);
 						should_loop = 0;
 						break;
 					}
 					if (type == 0) {
-						ret = ssh_flush(ssh_s, ufds[0].fd, NULL);
-						//printf("ssh_flush(ssh_s, %d) returned %zd\n",
-						//		ufds[0].fd, ret);
+						printf("\n\nSSH_MSG_NONE\n\n");
+
+						ret = ssh_flush(ssh_s, ufds[0].fd);
+						printf("ssh_flush(ssh_s, %d) returned %zd\n",
+								ufds[0].fd, ret);
 						if (ret < 0) {
-							fprintf(stderr, "ssh_flush() failed\n");
+							printf("ssh_flush() failed\n");
 							should_loop = 0;
 							break;
 						}
 
 						should_loop = 1;
 						break;
-					} else {
-						print_ssh_message_type(type);
 					}
 
 					size_t i = 0;
@@ -319,22 +404,29 @@ void* ssh_forwarder(void* arg) {
 
 					putchar('\n');
 
+					/* write (time, direction, message_type, message_length, message_data_hex) to log */
+					fprintf(log_fp, "%ld,c2s,%u,%zu,", (long) time(NULL), type,
+							len);
+					for (size_t i = 0; i < len; i++) {
+						fprintf(log_fp, "%02x", data[i]);
+					}
+					fprintf(log_fp, "\n");
+					fflush(log_fp);
+
 					ret = ssh_write(ssh_c, type, data, len);
-					//printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
-					//		ret);
+					printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
+							ret);
 					if (ret < 0) {
 						printf("ssh_write() failed\n");
 						should_loop = 0;
 						break;
 					}
 
-					errn = 0;
-					ret = ssh_flush(ssh_c, ufds[1].fd, &errn);
-					//printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd,
-					//		ret);
+					ret = ssh_flush(ssh_c, ufds[1].fd);
+					printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd,
+							ret);
 					if (ret < 0) {
-						fprintf(stderr, "ssh_flush() failed, errno: %d\n",
-								errn);
+						printf("ssh_flush() failed\n");
 						should_loop = 0;
 						break;
 					}
@@ -346,7 +438,6 @@ void* ssh_forwarder(void* arg) {
 				printf("\n++++++++++++++++++\n");
 			}
 
-			/* server socket readable */
 			if (ufds[1].revents & POLLIN) {
 				printf("\n------------------\n");
 
@@ -357,47 +448,46 @@ void* ssh_forwarder(void* arg) {
 				size_t len = 0;
 				ssize_t ret = 0;
 
-				int errn = 0;
-				ret = ssh_fill(ssh_c, ufds[1].fd, &errn);
-				//printf("ssh_fill(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
+				ret = ssh_fill(ssh_c, ufds[1].fd);
+				printf("ssh_fill(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
 				if (ret < 0) {
-					if (errn == EWOULDBLOCK || errn == EAGAIN) {
+					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
 						printf("ssh_fill() would block\n");
 					} else {
-						fprintf(stderr, "ssh_fill() failed\n");
+						printf("ssh_fill() failed\n");
 						break;
 					}
-				} else if (ret == 0) {
-					fprintf(stderr, "ssh_fill() EOF\n");
-					break;
 				}
 
 				u_char should_loop = 1;
 				while (1) {
-					ret = ssh_read(ssh_s, &type, &data, &len);
+					ret = ssh_read(ssh_c, &type, &data, &len);
 					printf(
-							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
+							"ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
 							ret, type, data, len);
+					print_ssh_message_type(type);
 					if (ret < 0) {
-						fprintf(stderr, "ssh_read() failed\n");
-						ssh_flush(ssh_s, ufds[0].fd, NULL);
+						printf("ssh_read() failed\n");
+						ssh_flush(ssh_s, ufds[0].fd);
 						should_loop = 0;
 						break;
 					}
-					if (type == 0) {
-						ret = ssh_flush(ssh_s, ufds[0].fd, NULL);
-						//printf("ssh_flush(ssh_s, %d) returned %zd\n",
-						//		ufds[0].fd, ret);
+					if (type == 52) {
+						auth_success = 1;
+					} else if (type == 0) {
+						printf("\n\nSSH_MSG_NONE\n\n");
+
+						ret = ssh_flush(ssh_c, ufds[1].fd);
+						printf("ssh_flush(ssh_c, %d) returned %zd\n",
+								ufds[1].fd, ret);
 						if (ret < 0) {
-							fprintf(stderr, "ssh_flush() failed\n");
+							printf("ssh_flush() failed\n");
 							should_loop = 0;
 							break;
 						}
 
 						should_loop = 1;
 						break;
-					} else {
-						print_ssh_message_type(type);
 					}
 
 					size_t i = 0;
@@ -415,22 +505,29 @@ void* ssh_forwarder(void* arg) {
 
 					putchar('\n');
 
+					/* write (time, direction, message_type, message_length, message_data_hex) to log */
+					fprintf(log_fp, "%ld,s2c,%u,%zu,", (long) time(NULL), type,
+							len);
+					for (size_t i = 0; i < len; i++) {
+						fprintf(log_fp, "%02x", data[i]);
+					}
+					fprintf(log_fp, "\n");
+					fflush(log_fp);
+
 					ret = ssh_write(ssh_s, type, data, len);
-					//printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,
-					//		ret);
+					printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,
+							ret);
 					if (ret < 0) {
 						printf("ssh_write() failed\n");
 						should_loop = 0;
 						break;
 					}
 
-					errn = 0;
-					ret = ssh_flush(ssh_c, ufds[1].fd, &errn);
-					//printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd,
-					//		ret);
+					ret = ssh_flush(ssh_s, ufds[0].fd);
+					printf("ssh_flush(ssh_s, %d) returned %zd\n", ufds[0].fd,
+							ret);
 					if (ret < 0) {
-						fprintf(stderr, "ssh_flush() failed, errno: %d\n",
-								errn);
+						printf("ssh_flush() failed\n");
 						should_loop = 0;
 						break;
 					}
@@ -442,6 +539,12 @@ void* ssh_forwarder(void* arg) {
 				printf("\n++++++++++++++++++\n");
 			}
 		}
+	}
+
+	if (auth_success) {
+		printf("Login succeeded\n");
+	} else {
+		printf("Login failed\n");
 	}
 
 	/* TODO release the VM */
@@ -458,6 +561,7 @@ void* ssh_forwarder(void* arg) {
 	close(args->real_client_fd);
 	shutdown(real_server_fd, SHUT_RDWR);
 	close(real_server_fd);
+	fclose(log_fp);
 	//pthread_exit(NULL);
 	printf("thread for %d terminating\n", args->real_client_fd);
 	return NULL;

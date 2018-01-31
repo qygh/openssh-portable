@@ -9,6 +9,8 @@
 
 static int create_tcp_listening_socket(uint16_t port);
 
+//./my_hpot_main 0 openssh-portable/ssh_host_rsa_key 9000 3 al0 b0 tvm eth0 300
+
 int main(int argc, char* argv[]) {
 	int mode = -1;
 	char* private_key = NULL;

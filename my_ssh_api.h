@@ -18,8 +18,8 @@ ssize_t ssh_read(struct ssh* ssh, u_char* type, const u_char** datap,
 
 ssize_t ssh_write(struct ssh* ssh, u_char type, const u_char* data, size_t len);
 
-ssize_t ssh_fill(struct ssh* ssh, int in_fd, int* errno_out);
+ssize_t ssh_fill(struct ssh* ssh, int in_fd);
 
-ssize_t ssh_flush(struct ssh* ssh, int out_fd, int* errno_out);
+ssize_t ssh_flush(struct ssh* ssh, int out_fd);
 
 #endif /* MY_SSH_API_H_ */
