@@ -46,6 +46,8 @@ struct my_vm_pool {
 	struct my_lxd_api* lxd_api;
 };
 
+int is_ip_ipv6(uint8_t ip_addr[16]);
+
 struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 		const char* base_image_name, const char* base_snapshot_name,
 		const char* vm_name_prefix, const char* vm_nic_name,

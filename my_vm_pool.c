@@ -7,7 +7,7 @@
 
 #include "my_vm_pool.h"
 
-static int is_ip_ipv6(uint8_t ip_addr[16]) {
+int is_ip_ipv6(uint8_t ip_addr[16]) {
 	int zero_x_10 = 0;
 	for (int i = 0; i < 10; i++) {
 		if (ip_addr[i] != 0) {

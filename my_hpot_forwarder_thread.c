@@ -91,29 +91,16 @@ void* ssh_forwarder(void* arg) {
 
 	/* TODO implement a fake SSH server that never authenticates in error cases above */
 
-	/* TODO implement actual logging */
-	char log_filename[50] = { 0 };
-	snprintf(log_filename, sizeof(log_filename), "log_%ld_%u",
-			(long) time(NULL), vm_id);
-	FILE* log_fp = fopen(log_filename, "a");
-	if (log_fp == NULL) {
+	/* TODO implement SQL logging */
+	struct my_logger_file* logger_file = NULL;
+	//TODO do not hard-code prefix
+	logger_file = my_logger_file_new("log", vm_id, client_ip, vm_ip);
+	if (logger_file == NULL) {
 		//TODO error handling
-		fprintf(stderr, "fopen() failed\n");
+		fprintf(stderr, "my_logger_file_new() failed\n");
 
 		return NULL;
 	}
-
-	/* write (time, client_ip, vm_ip, vm_id) to log */
-	fprintf(log_fp, "%ld,", (long) time(NULL));
-	for (int i = 0; i < 16; i++) {
-		fprintf(log_fp, "%02x", client_ip[i]);
-	}
-	fprintf(log_fp, ",");
-	for (int i = 0; i < 16; i++) {
-		fprintf(log_fp, "%02x", vm_ip[i]);
-	}
-	fprintf(log_fp, ",%u\n", vm_id);
-	fflush(log_fp);
 
 	struct sockaddr_in6 vm_sa = { 0 };
 	vm_sa.sin6_family = AF_INET6;
@@ -132,6 +119,66 @@ void* ssh_forwarder(void* arg) {
 	} else {
 		printf("socket() returned %d\n", real_server_fd);
 	}
+
+	//TODO SNAT source IP
+	{
+		char src_ip[INET6_ADDRSTRLEN] = { 0 };
+		char dst_ip[INET6_ADDRSTRLEN] = { 0 };
+		if (is_ip_ipv6(client_ip)) {
+			const char* ret = inet_ntop(AF_INET6, client_ip, src_ip,
+					sizeof(src_ip));
+			const char* ret2 = inet_ntop(AF_INET6, vm_ip, dst_ip,
+					sizeof(dst_ip));
+			if (ret != NULL && ret2 != NULL) {
+				char command[1024] = { 0 };
+				snprintf(command, sizeof(command),
+						"ip6tables -t nat -C POSTROUTING -d %s -j SNAT --to %s",
+						dst_ip, src_ip);
+				int ret3 = system(command);
+				fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+				if (ret3 != 0) {
+					/* rules does not exist */
+					char command2[1024] = { 0 };
+					snprintf(command2, sizeof(command2),
+							"ip6tables -t nat -I POSTROUTING -d %s -j SNAT --to %s",
+							dst_ip, src_ip);
+					int ret4 = system(command2);
+					if (ret4 != 0) {
+						fprintf(stderr,
+								"system(%s) returned %d, failed to add ip6tables rule\n",
+								command2, ret4);
+					}
+				}
+			}
+		} else {
+			const char* ret = inet_ntop(AF_INET, client_ip + 12, src_ip,
+					sizeof(src_ip));
+			const char* ret2 = inet_ntop(AF_INET, vm_ip + 12, dst_ip,
+					sizeof(dst_ip));
+			if (ret != NULL && ret2 != NULL) {
+				char command[1024] = { 0 };
+				snprintf(command, sizeof(command),
+						"iptables -t nat -C POSTROUTING -d %s -j SNAT --to %s",
+						dst_ip, src_ip);
+				int ret3 = system(command);
+				fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+				if (ret3 != 0) {
+					/* rules does not exist */
+					char command2[1024] = { 0 };
+					snprintf(command2, sizeof(command2),
+							"iptables -t nat -I POSTROUTING -d %s -j SNAT --to %s",
+							dst_ip, src_ip);
+					int ret4 = system(command2);
+					if (ret4 != 0) {
+						fprintf(stderr,
+								"system(%s) returned %d, failed to add iptables rule\n",
+								command2, ret4);
+					}
+				}
+			}
+		}
+	}
+
 	ret = connect(real_server_fd, (struct sockaddr*) &vm_sa, sizeof(vm_sa));
 	if (ret < 0) {
 		//TODO error handling
@@ -404,14 +451,11 @@ void* ssh_forwarder(void* arg) {
 
 					putchar('\n');
 
-					/* write (time, direction, message_type, message_length, message_data_hex) to log */
-					fprintf(log_fp, "%ld,c2s,%u,%zu,", (long) time(NULL), type,
-							len);
-					for (size_t i = 0; i < len; i++) {
-						fprintf(log_fp, "%02x", data[i]);
+					/* write this message to log */
+					ret = my_logger_file_write(logger_file, 1, type, len, data);
+					if (ret < 0) {
+						//TODO error handling for log failure
 					}
-					fprintf(log_fp, "\n");
-					fflush(log_fp);
 
 					ret = ssh_write(ssh_c, type, data, len);
 					printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
@@ -505,14 +549,11 @@ void* ssh_forwarder(void* arg) {
 
 					putchar('\n');
 
-					/* write (time, direction, message_type, message_length, message_data_hex) to log */
-					fprintf(log_fp, "%ld,s2c,%u,%zu,", (long) time(NULL), type,
-							len);
-					for (size_t i = 0; i < len; i++) {
-						fprintf(log_fp, "%02x", data[i]);
+					/* write this message to log */
+					ret = my_logger_file_write(logger_file, 0, type, len, data);
+					if (ret < 0) {
+						//TODO error handling for log failure
 					}
-					fprintf(log_fp, "\n");
-					fflush(log_fp);
 
 					ret = ssh_write(ssh_s, type, data, len);
 					printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,
@@ -561,7 +602,7 @@ void* ssh_forwarder(void* arg) {
 	close(args->real_client_fd);
 	shutdown(real_server_fd, SHUT_RDWR);
 	close(real_server_fd);
-	fclose(log_fp);
+	my_logger_file_free(logger_file);
 	//pthread_exit(NULL);
 	printf("thread for %d terminating\n", args->real_client_fd);
 	return NULL;

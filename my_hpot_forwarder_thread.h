@@ -23,6 +23,7 @@
 
 #include "my_ssh_api.h"
 #include "my_vm_pool.h"
+#include "my_logger_file.h"
 
 struct ssh_forwarder_thread_arg {
 	char* ssh_private_key_path;

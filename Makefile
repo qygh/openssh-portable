@@ -98,7 +98,7 @@ MYSSHTESTOBJS=${LIBOPENSSH_OBJS} \
 	my_ssh_test.o
 	
 MYHPOTOBJS=${LIBOPENSSH_OBJS} \
-	my_hpot_main.o my_hpot_forwarder_thread.o my_lxd_api.o my_ssh_api.o my_vm_pool.o my_curl_memory.o sds.o
+	my_hpot_main.o my_hpot_forwarder_thread.o my_logger_file.o my_lxd_api.o my_ssh_api.o my_vm_pool.o my_curl_memory.o sds.o
 
 SSHOBJS= ssh.o readconf.o clientloop.o sshtty.o \
 	sshconnect.o sshconnect2.o mux.o
