@@ -171,6 +171,9 @@ my_ssh_test$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYSSHTESTOBJS)
 	
 my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS)
 	$(LD) -o $@ $(MYHPOTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lcurl -ljansson -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
+	
+my_logger_pqsql_test: my_logger_pqsql.c
+	gcc -O3 -I/usr/include/postgresql my_logger_pqsql.c -lpq -o my_logger_pqsql
 
 ssh$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHOBJS)
 	$(LD) -o $@ $(SSHOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHLIBS) $(LIBS) $(GSSLIBS)
