@@ -42,7 +42,7 @@ PATHS= -DSSHDIR=\"$(sysconfdir)\" \
 
 CC=gcc
 LD=gcc
-CFLAGS=-g -O2 -pipe -Wall -Wpointer-arith -Wuninitialized -Wsign-compare -Wformat-security -Wsizeof-pointer-memaccess -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -D_FORTIFY_SOURCE=2 -ftrapv -fno-builtin-memset -fstack-protector-strong -fPIE  
+CFLAGS=-I/usr/include/postgresql -O2 -pipe -Wall -Wpointer-arith -Wuninitialized -Wsign-compare -Wformat-security -Wsizeof-pointer-memaccess -Wno-pointer-sign -Wno-unused-result -fno-strict-aliasing -D_FORTIFY_SOURCE=2 -ftrapv -fno-builtin-memset -fstack-protector-strong -fPIE  
 CPPFLAGS=-I. -I$(srcdir)  -D_XOPEN_SOURCE=600 -D_BSD_SOURCE -D_DEFAULT_SOURCE $(PATHS) -DHAVE_CONFIG_H
 LIBS=-lcrypto -ldl -lutil -lz  -lcrypt -lresolv
 K5LIBS=
@@ -169,11 +169,11 @@ libssh.a: $(LIBSSH_OBJS)
 my_ssh_test$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYSSHTESTOBJS)
 	$(LD) -o $@ $(MYSSHTESTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 	
-my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS)
+my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS) my_logger_pqsql
 	$(LD) -o $@ $(MYHPOTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lcurl -ljansson -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 	
-my_logger_pqsql_test: my_logger_pqsql.c
-	gcc -O3 -I/usr/include/postgresql my_logger_pqsql.c -lpq -o my_logger_pqsql
+my_logger_pqsql_test: my_logger_pqsql.o my_logger_pqsql_test.o
+	$(LD) -o $@ my_logger_pqsql.o my_logger_pqsql_test.o $(LDFLAGS) -lpq
 
 ssh$(EXEEXT): $(LIBCOMPAT) libssh.a $(SSHOBJS)
 	$(LD) -o $@ $(SSHOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHLIBS) $(LIBS) $(GSSLIBS)

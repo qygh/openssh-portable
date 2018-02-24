@@ -101,6 +101,7 @@ void* ssh_forwarder(void* arg) {
 
 		return NULL;
 	}
+	//TODO create SQL logger
 
 	struct sockaddr_in6 vm_sa = { 0 };
 	vm_sa.sin6_family = AF_INET6;
@@ -456,6 +457,7 @@ void* ssh_forwarder(void* arg) {
 					if (ret < 0) {
 						//TODO error handling for log failure
 					}
+					//TODO SQL: write message
 
 					ret = ssh_write(ssh_c, type, data, len);
 					printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
@@ -518,6 +520,7 @@ void* ssh_forwarder(void* arg) {
 					}
 					if (type == 52) {
 						auth_success = 1;
+						//TODO SQL: set login success
 					} else if (type == 0) {
 						printf("\n\nSSH_MSG_NONE\n\n");
 
@@ -554,6 +557,7 @@ void* ssh_forwarder(void* arg) {
 					if (ret < 0) {
 						//TODO error handling for log failure
 					}
+					//TODO SQL: write message
 
 					ret = ssh_write(ssh_s, type, data, len);
 					printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,

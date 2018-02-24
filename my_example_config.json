@@ -1,0 +1,17 @@
+{
+	"server_key1_path":"/path1",
+	"server_key2_enabled":false,
+	"server_key2_path":"/path2",
+	"listening_port":1234,
+	"vm_pool_size":5,
+	"vm_base_image_name":"base_img",
+	"vm_base_snapshot_name":"base_snap",
+	"vm_nic_name":"nic",
+	"vm_name_prefix":"prefix",
+	"vm_idle_timeout":100,
+	"log_file_enabled":false,
+	"log_file_prefix":"lf_prefix",
+	"log_pqsql_enabled":false,
+	"log_pqsql_conninfo":"lp_prefix",
+	"iptables_snat_enabled":true
+}
