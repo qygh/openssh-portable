@@ -317,6 +317,8 @@ void* ssh_forwarder(void* arg) {
 		return NULL;
 	}
 
+	printf("AAAA\n");
+
 	/* initialise SSH private key */
 	sshkey_1 = key_load_private(args->hpot_config->server_key1_path, "", NULL);
 	if (sshkey_1 == NULL) {
@@ -336,6 +338,8 @@ void* ssh_forwarder(void* arg) {
 	} else {
 		printf("key_load_private() returned %p\n", sshkey_1);
 	}
+
+	printf("BBBB\n");
 
 	/* add SSH private key to SSH object */
 	ret = ssh_add_hostkey(ssh_s, sshkey_1);
@@ -357,6 +361,8 @@ void* ssh_forwarder(void* arg) {
 	} else {
 		printf("ssh_add_hostkey() returned %d\n", ret);
 	}
+
+	printf("CCCC\n");
 
 	if (args->hpot_config->server_key2_enabled) {
 		sshkey_2 = key_load_private(args->hpot_config->server_key2_path, "",
@@ -403,6 +409,8 @@ void* ssh_forwarder(void* arg) {
 		}
 	}
 
+	printf("DDDD\n");
+
 	/* initialise SSH object */
 	ret = ssh_init(&ssh_c, 0, NULL);
 	if (ret != 0) {
@@ -411,7 +419,7 @@ void* ssh_forwarder(void* arg) {
 		//TODO handle connection with fake SSH server
 
 		if (sshkey_2 != NULL) {
-			sshkey_free(sshkey_1);
+			sshkey_free(sshkey_2);
 		}
 		sshkey_free(sshkey_1);
 		ssh_free(ssh_s);
@@ -427,6 +435,8 @@ void* ssh_forwarder(void* arg) {
 		printf("ssh_init() returned %d, ssh: %p\n", ret, ssh_c);
 	}
 
+	printf("EEEE\n");
+
 	/* set SSH host key verification function */
 	ret = ssh_set_verify_host_key_callback(ssh_c, verify_host_key);
 	if (ret != 0) {
@@ -437,7 +447,7 @@ void* ssh_forwarder(void* arg) {
 
 		ssh_free(ssh_c);
 		if (sshkey_2 != NULL) {
-			sshkey_free(sshkey_1);
+			sshkey_free(sshkey_2);
 		}
 		sshkey_free(sshkey_1);
 		ssh_free(ssh_s);
@@ -450,6 +460,8 @@ void* ssh_forwarder(void* arg) {
 		close(real_server_fd);
 		return NULL;
 	}
+
+	printf("FFFF\n");
 
 	/* poll the two sockets */
 	struct pollfd ufds[2];
@@ -467,6 +479,8 @@ void* ssh_forwarder(void* arg) {
 		ssh_read(ssh_c, &type, &data, &len);
 		ssh_flush(ssh_c, ufds[1].fd);
 	}
+
+	printf("GGGG\n");
 
 	int auth_success = 0;
 	while (1) {
@@ -514,12 +528,12 @@ void* ssh_forwarder(void* arg) {
 			 }
 			 }*/
 		} else {
-			printf("poll() returned %d\n", ret);
+			/*printf("poll() returned %d\n", ret);*/
 
 			if (ufds[0].revents & POLLIN) {
-				printf("\n------------------\n");
+				/*printf("\n------------------\n");
 
-				printf("Data available from client\n");
+				 printf("Data available from client\n");*/
 
 				u_char type = 0;
 				const u_char* data = NULL;
@@ -527,7 +541,7 @@ void* ssh_forwarder(void* arg) {
 				ssize_t ret = 0;
 
 				ret = ssh_fill(ssh_s, ufds[0].fd);
-				printf("ssh_fill(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);
+				/*printf("ssh_fill(ssh_s, %d) returned %zd\n", ufds[0].fd, ret);*/
 				if (ret < 0) {
 					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
 						printf("ssh_fill() would block\n");
@@ -541,10 +555,10 @@ void* ssh_forwarder(void* arg) {
 				u_char should_loop = 1;
 				while (1) {
 					ret = ssh_read(ssh_s, &type, &data, &len);
-					printf(
-							"ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
-							ret, type, data, len);
-					print_ssh_message_type(type);
+					/*printf(
+					 "ssh_read(ssh_s) returned %zd, type: %u, data: %p, len: %zu\n",
+					 ret, type, data, len);
+					 print_ssh_message_type(type);*/
 					if (ret < 0) {
 						fprintf(stderr, "thread for %d: ssh_read() failed\n",
 								args->real_client_fd);
@@ -553,11 +567,11 @@ void* ssh_forwarder(void* arg) {
 						break;
 					}
 					if (type == 0) {
-						printf("\n\nSSH_MSG_NONE\n\n");
+						/*printf("\n\nSSH_MSG_NONE\n\n");*/
 
 						ret = ssh_flush(ssh_s, ufds[0].fd);
-						printf("ssh_flush(ssh_s, %d) returned %zd\n",
-								ufds[0].fd, ret);
+						/*printf("ssh_flush(ssh_s, %d) returned %zd\n",
+						 ufds[0].fd, ret);*/
 						if (ret < 0) {
 							fprintf(stderr,
 									"thread for %d: ssh_flush() failed\n",
@@ -571,19 +585,19 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					size_t i = 0;
-					putchar('\n');
-					for (i = 0; i < len; i++) {
-						printf("%02x ", data[i]);
-					}
-					putchar('\n');
+					/*putchar('\n');
+					 for (i = 0; i < len; i++) {
+					 printf("%02x ", data[i]);
+					 }
+					 putchar('\n');
 
-					putchar('\n');
-					for (i = 0; i < len; i++) {
-						putchar(data[i]);
-					}
-					putchar('\n');
+					 putchar('\n');
+					 for (i = 0; i < len; i++) {
+					 putchar(data[i]);
+					 }
+					 putchar('\n');
 
-					putchar('\n');
+					 putchar('\n');*/
 
 					/* write this message to logs */
 					if (args->hpot_config->log_file_enabled) {
@@ -611,8 +625,8 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					ret = ssh_write(ssh_c, type, data, len);
-					printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
-							ret);
+					/*printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
+					 ret);*/
 					if (ret < 0) {
 						fprintf(stderr, "thread for %d: ssh_write() failed\n",
 								args->real_client_fd);
@@ -621,8 +635,8 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					ret = ssh_flush(ssh_c, ufds[1].fd);
-					printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd,
-							ret);
+					/*printf("ssh_flush(ssh_c, %d) returned %zd\n", ufds[1].fd,
+					 ret);*/
 					if (ret < 0) {
 						fprintf(stderr, "thread for %d: ssh_flush() failed\n",
 								args->real_client_fd);
@@ -634,13 +648,13 @@ void* ssh_forwarder(void* arg) {
 					break;
 				}
 
-				printf("\n++++++++++++++++++\n");
+				/*printf("\n++++++++++++++++++\n");*/
 			}
 
 			if (ufds[1].revents & POLLIN) {
-				printf("\n------------------\n");
+				/*printf("\n------------------\n");
 
-				printf("Data available from server\n");
+				 printf("Data available from server\n");*/
 
 				u_char type = 0;
 				const u_char* data = NULL;
@@ -648,7 +662,7 @@ void* ssh_forwarder(void* arg) {
 				ssize_t ret = 0;
 
 				ret = ssh_fill(ssh_c, ufds[1].fd);
-				printf("ssh_fill(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);
+				/*printf("ssh_fill(ssh_c, %d) returned %zd\n", ufds[1].fd, ret);*/
 				if (ret < 0) {
 					if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
 						printf("ssh_fill() would block\n");
@@ -662,10 +676,10 @@ void* ssh_forwarder(void* arg) {
 				u_char should_loop = 1;
 				while (1) {
 					ret = ssh_read(ssh_c, &type, &data, &len);
-					printf(
-							"ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
-							ret, type, data, len);
-					print_ssh_message_type(type);
+					/*printf(
+					 "ssh_read(ssh_c) returned %zd, type: %u, data: %p, len: %zu\n",
+					 ret, type, data, len);
+					 print_ssh_message_type(type);*/
 					if (ret < 0) {
 						fprintf(stderr, "thread for %d: ssh_read() failed\n",
 								args->real_client_fd);
@@ -692,11 +706,11 @@ void* ssh_forwarder(void* arg) {
 							printf("Auth succeeded again\n");
 						}
 					} else if (type == 0) {
-						printf("\n\nSSH_MSG_NONE\n\n");
+						/*printf("\n\nSSH_MSG_NONE\n\n");*/
 
 						ret = ssh_flush(ssh_c, ufds[1].fd);
-						printf("ssh_flush(ssh_c, %d) returned %zd\n",
-								ufds[1].fd, ret);
+						/*printf("ssh_flush(ssh_c, %d) returned %zd\n",
+						 ufds[1].fd, ret);*/
 						if (ret < 0) {
 							fprintf(stderr,
 									"thread for %d: ssh_flush() failed\n",
@@ -710,19 +724,19 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					size_t i = 0;
-					putchar('\n');
-					for (i = 0; i < len; i++) {
-						printf("%02x ", data[i]);
-					}
-					putchar('\n');
+					/*putchar('\n');
+					 for (i = 0; i < len; i++) {
+					 printf("%02x ", data[i]);
+					 }
+					 putchar('\n');
 
-					putchar('\n');
-					for (i = 0; i < len; i++) {
-						putchar(data[i]);
-					}
-					putchar('\n');
+					 putchar('\n');
+					 for (i = 0; i < len; i++) {
+					 putchar(data[i]);
+					 }
+					 putchar('\n');
 
-					putchar('\n');
+					 putchar('\n');*/
 
 					/* write this message to logs */
 					if (args->hpot_config->log_file_enabled) {
@@ -750,8 +764,8 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					ret = ssh_write(ssh_s, type, data, len);
-					printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,
-							ret);
+					/*printf("ssh_write(ssh_s, %d) returned %zd\n", ufds[0].fd,
+					 ret);*/
 					if (ret < 0) {
 						fprintf(stderr, "thread for %d: ssh_write() failed\n",
 								args->real_client_fd);
@@ -760,8 +774,8 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					ret = ssh_flush(ssh_s, ufds[0].fd);
-					printf("ssh_flush(ssh_s, %d) returned %zd\n", ufds[0].fd,
-							ret);
+					/*printf("ssh_flush(ssh_s, %d) returned %zd\n", ufds[0].fd,
+					 ret);*/
 					if (ret < 0) {
 						fprintf(stderr, "thread for %d: ssh_flush() failed\n",
 								args->real_client_fd);
@@ -773,7 +787,7 @@ void* ssh_forwarder(void* arg) {
 					break;
 				}
 
-				printf("\n++++++++++++++++++\n");
+				/*printf("\n++++++++++++++++++\n");*/
 			}
 		}
 	}
@@ -802,7 +816,7 @@ void* ssh_forwarder(void* arg) {
 
 	ssh_free(ssh_c);
 	if (sshkey_2 != NULL) {
-		sshkey_free(sshkey_1);
+		sshkey_free(sshkey_2);
 	}
 	sshkey_free(sshkey_1);
 	ssh_free(ssh_s);

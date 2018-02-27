@@ -146,7 +146,7 @@ int main(int argc, char* argv[]) {
 			ssh_cleanup_thread_arg.barrier = ssh_forwarder_thread_barrier;
 
 			pthread_t ssh_cleanup_thread;
-			if (pthread_create(&ssh_cleanup_thread, NULL, ssh_forwarder,
+			if (pthread_create(&ssh_cleanup_thread, NULL, hpot_cleanup,
 					&ssh_cleanup_thread_arg) != 0) {
 				fprintf(stderr, "pthread_create() failed\n");
 
