@@ -100,11 +100,12 @@ struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 	}
 
 	/* initialise VMs */
-	/* It will take a long time */
+	/* it will probably take a long time */
 	for (uint32_t i = 0; i < mvp->pool_size; i++) {
 		mvp->pool[i].id = i;
 		mvp->pool[i].conn_count = 0;
 		mvp->pool[i].vm_state = invalid;
+		memset(mvp->pool[i].last_get_vm_ip_addr, 0, 16);
 		if (pthread_rwlock_init(&(mvp->pool[i].lock), NULL) != 0) {
 			my_vm_pool_free(mvp, 1);
 			return NULL;
@@ -383,6 +384,8 @@ int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, uint32_t vm_id,
 			int ret = my_lxd_api_get_container_ip(vm_pool->lxd_api, vm_name,
 					nic_name, is_client_ip_ipv6, vm_ip_addr_out);
 			if (ret >= 0) {
+				memcpy(vm_pool->pool[vm_id].last_get_vm_ip_addr, vm_ip_addr_out,
+						16);
 				succeed = 1;
 			}
 		}
@@ -397,7 +400,8 @@ int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, uint32_t vm_id,
 	return 0;
 }
 
-int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool) {
+int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
+		int delete_iptables_snat) {
 	if (vm_pool == NULL) {
 		return -1;
 	}
@@ -429,6 +433,57 @@ int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool) {
 
 				/* always power off the VM */
 				my_lxd_api_power_container(vm_pool->lxd_api, vm_name, 0);
+
+				/* delete iptables SNAT rules */
+				if (delete_iptables_snat) {
+					char src_ip[INET6_ADDRSTRLEN] = { 0 };
+					char dst_ip[INET6_ADDRSTRLEN] = { 0 };
+					if (is_ip_ipv6(vm_pool->pool[i].client_ip_addr)) {
+						const char* ret = inet_ntop(AF_INET6,
+								vm_pool->pool[i].client_ip_addr, src_ip,
+								sizeof(src_ip));
+						const char* ret2 = inet_ntop(AF_INET6,
+								vm_pool->pool[i].last_get_vm_ip_addr, dst_ip,
+								sizeof(dst_ip));
+						if (ret != NULL && ret2 != NULL) {
+							char command[1024] = { 0 };
+							snprintf(command, sizeof(command),
+									"ip6tables -t nat -D POSTROUTING -d %s -j SNAT --to %s",
+									dst_ip, src_ip);
+							while (1) {
+								/* loop until no such rule exists */
+								int ret3 = system(command);
+								fprintf(stderr, "system(%s) returned %d\n",
+										command, ret3);
+								if (ret3 != 0) {
+									break;
+								}
+							}
+						}
+					} else {
+						const char* ret = inet_ntop(AF_INET,
+								(vm_pool->pool[i].client_ip_addr) + 12, src_ip,
+								sizeof(src_ip));
+						const char* ret2 = inet_ntop(AF_INET,
+								(vm_pool->pool[i].last_get_vm_ip_addr) + 12,
+								dst_ip, sizeof(dst_ip));
+						if (ret != NULL && ret2 != NULL) {
+							char command[1024] = { 0 };
+							snprintf(command, sizeof(command),
+									"iptables -t nat -D POSTROUTING -d %s -j SNAT --to %s",
+									dst_ip, src_ip);
+							while (1) {
+								/* loop until no such rule exists */
+								int ret3 = system(command);
+								fprintf(stderr, "system(%s) returned %d\n",
+										command, ret3);
+								if (ret3 != 0) {
+									break;
+								}
+							}
+						}
+					}
+				}
 
 				int ret = my_lxd_api_create_snapshot(vm_pool->lxd_api, vm_name,
 						snapshot_name);

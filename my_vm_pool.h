@@ -30,6 +30,7 @@ struct my_vm_instance {
 	uint32_t id;
 	uint32_t conn_count;
 	uint8_t client_ip_addr[16];
+	uint8_t last_get_vm_ip_addr[16];
 	enum my_vm_state vm_state;
 	time_t last_disconn;
 	pthread_rwlock_t lock;
@@ -61,7 +62,8 @@ int my_vm_pool_release(struct my_vm_pool* vm_pool, uint32_t vm_id);
 int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, uint32_t vm_id,
 		const char* nic_name, uint8_t vm_ip_addr_out[16]);
 
-int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool);
+int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
+		int delete_iptables_snat);
 
 int my_vm_pool_set_compromised(struct my_vm_pool* vm_pool, uint32_t vm_id);
 

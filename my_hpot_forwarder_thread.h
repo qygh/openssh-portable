@@ -24,13 +24,13 @@
 #include "my_ssh_api.h"
 #include "my_vm_pool.h"
 #include "my_logger_file.h"
+#include "my_logger_pqsql.h"
+#include "my_hpot_config.h"
 
 struct ssh_forwarder_thread_arg {
-	char* ssh_private_key_path;
 	int real_client_fd;
 	struct my_vm_pool* vm_pool;
-	//char* server_hostname;
-	char* server_port;
+	struct my_hpot_config* hpot_config;
 	pthread_barrier_t* barrier;
 };
 

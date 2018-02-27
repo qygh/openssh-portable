@@ -98,7 +98,7 @@ MYSSHTESTOBJS=${LIBOPENSSH_OBJS} \
 	my_ssh_test.o
 	
 MYHPOTOBJS=${LIBOPENSSH_OBJS} \
-	my_hpot_main.o my_hpot_forwarder_thread.o my_logger_file.o my_lxd_api.o my_ssh_api.o my_vm_pool.o my_curl_memory.o sds.o
+	my_hpot_main.o my_hpot_config.o my_hpot_forwarder_thread.o my_hpot_cleanup_thread.o my_logger_file.o my_lxd_api.o my_ssh_api.o my_vm_pool.o my_curl_memory.o sds.o my_logger_pqsql.o
 
 SSHOBJS= ssh.o readconf.o clientloop.o sshtty.o \
 	sshconnect.o sshconnect2.o mux.o
@@ -169,8 +169,8 @@ libssh.a: $(LIBSSH_OBJS)
 my_ssh_test$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYSSHTESTOBJS)
 	$(LD) -o $@ $(MYSSHTESTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 	
-my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS) my_logger_pqsql
-	$(LD) -o $@ $(MYHPOTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lcurl -ljansson -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
+my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS)
+	$(LD) -o $@ $(MYHPOTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lcurl -ljansson -lpq -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
 	
 my_logger_pqsql_test: my_logger_pqsql.o my_logger_pqsql_test.o
 	$(LD) -o $@ my_logger_pqsql.o my_logger_pqsql_test.o $(LDFLAGS) -lpq

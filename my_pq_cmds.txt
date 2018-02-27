@@ -1,0 +1,6 @@
+psql -U hpot -d hpot -h 127.0.0.1
+./my_logger_pqsql "host=127.0.0.1 user=u dbname=h password=p"
+
+create table sessions (session_id bigserial, start_time timestamp not null, vm_id int not null, client_ip inet not null, vm_ip inet not null, end_time timestamp not null, success boolean not null, constraint prok primary key(session_id));
+
+create table messages (session_id bigint not null, start_time timestamp not null, vm_id int not null, time timestamp not null, direction_c2s boolean not null, message_type smallint not null, message_length bigint not null, message_data bytea not null, constraint fork foreign key(session_id) references sessions(session_id));

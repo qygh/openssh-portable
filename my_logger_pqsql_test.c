@@ -13,7 +13,7 @@ int main(int argc, char* argv[]) {
 	if (argc > 1) {
 		conninfo = argv[1];
 	} else {
-		conninfo = "dbname = postgres";
+		conninfo = "host=127.0.0.1 user=u dbname=d password=p";
 	}
 
 	uint32_t vm_id = 500;

@@ -5,34 +5,7 @@
  *      Author: lqy
  */
 
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-#include <jansson.h>
-
-struct my_hpot_config {
-	char* server_key1_path;
-
-	int server_key2_enabled;
-	char* server_key2_path;
-
-	uint16_t listening_port;
-
-	uint32_t vm_pool_size;
-	char* vm_base_image_name;
-	char* vm_base_snapshot_name;
-	char* vm_nic_name;
-	char* vm_name_prefix;
-	time_t vm_idle_timeout;
-
-	int log_file_enabled;
-	char* log_file_prefix;
-
-	int log_pqsql_enabled;
-	char* log_pqsql_conninfo;
-
-	int iptables_snat_enabled;
-};
+#include "my_hpot_config.h"
 
 static void free_all_config_strings(struct my_hpot_config* mhc) {
 	free(mhc->server_key1_path);
@@ -404,6 +377,39 @@ struct my_hpot_config* my_hpot_config_new(const char* config_file_path) {
 	}
 
 	{
+		json_t* j_status = json_object_get(j_root, "vm_ssh_port");
+		if (j_status == NULL) {
+			fprintf(stderr,
+					"my_hpot_config_new(): failed to get 'vm_ssh_port'\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+		if (!json_is_integer(j_status)) {
+			fprintf(stderr,
+					"my_hpot_config_new(): 'vm_ssh_port' is not integer\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+		int port = json_integer_value(j_status);
+		if (port < 0 || port > 65535) {
+			fprintf(stderr,
+					"my_hpot_config_new(): 'vm_ssh_port' is not in range [0, 65535]\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+		mhc->vm_ssh_port = port;
+	}
+
+	{
 		json_t* j_status = json_object_get(j_root, "vm_idle_timeout");
 		if (j_status == NULL) {
 			fprintf(stderr,
@@ -597,44 +603,4 @@ void my_hpot_config_free(struct my_hpot_config* hpot_config) {
 
 	free_all_config_strings(hpot_config);
 	free(hpot_config);
-}
-
-int main(int argc, char* argv[]) {
-	if (argc < 2) {
-		fprintf(stderr, "configuration file path not specified\n");
-
-		return 1;
-	}
-
-	struct my_hpot_config* mhc = my_hpot_config_new(argv[1]);
-	if (mhc == NULL) {
-		fprintf(stderr, "my_hpot_config_new() failed\n");
-
-		return 1;
-	}
-
-	printf("server_key1_path: %s\n", mhc->server_key1_path);
-
-	printf("server_key1_enabled: %d\n", mhc->server_key2_enabled);
-	printf("server_key2_path: %s\n", mhc->server_key2_path);
-
-	printf("listening_port: %u\n", mhc->listening_port);
-
-	printf("vm_pool_size: %u\n", mhc->vm_pool_size);
-	printf("vm_base_image_name: %s\n", mhc->vm_base_image_name);
-	printf("vm_base_snapshot_name: %s\n", mhc->vm_base_snapshot_name);
-	printf("vm_nic_name: %s\n", mhc->vm_nic_name);
-	printf("vm_name_prefix: %s\n", mhc->vm_name_prefix);
-	printf("vm_idle_timeout: %ld\n", (long) mhc->vm_idle_timeout);
-
-	printf("log_file_enabled: %d\n", mhc->log_file_enabled);
-	printf("log_file_prefix: %s\n", mhc->log_file_prefix);
-
-	printf("log_pqsql_enabled: %d\n", mhc->log_pqsql_enabled);
-	printf("log_pqsql_conninfo: %s\n", mhc->log_pqsql_conninfo);
-
-	printf("iptables_snat_enabled: %d\n", mhc->iptables_snat_enabled);
-
-	my_hpot_config_free(mhc);
-	return 0;
 }
