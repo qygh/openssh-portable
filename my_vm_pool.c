@@ -410,10 +410,17 @@ int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
 
 	int error = 0;
 	for (uint32_t i = 0; i < vm_pool->pool_size; i++) {
+		//printf("my_vm_pool_process_idle_timeout_vms(): at index %u\n", i);
 		pthread_rwlock_wrlock(&(vm_pool->pool[i].lock));
 		if (vm_pool->pool[i].vm_state == compromised_idle) {
+			printf(
+					"my_vm_pool_process_idle_timeout_vms(): compromised_idle at index %u\n",
+					i);
 			if (call_time - vm_pool->pool[i].last_disconn
 					> vm_pool->idle_timeout) {
+				printf(
+						"my_vm_pool_process_idle_timeout_vms(): idle timeout at index %u\n",
+						i);
 				sds vm_name = sdscatprintf(sdsempty(), "%s-%u",
 						vm_pool->vm_name_prefix, i);
 				if (vm_name == NULL) {
@@ -516,6 +523,8 @@ int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
 
 				sdsfree(snapshot_name);
 				sdsfree(vm_name);
+
+				vm_pool->pool[i].vm_state = uncompromised_idle;
 			}
 		}
 		pthread_rwlock_unlock(&(vm_pool->pool[i].lock));
@@ -539,8 +548,16 @@ int my_vm_pool_set_compromised(struct my_vm_pool* vm_pool, uint32_t vm_id) {
 
 	int succeed = 0;
 	pthread_rwlock_wrlock(&(vm_pool->pool[vm_id].lock));
-	if (vm_pool->pool[vm_id].vm_state == uncompromised_connected) {
+	printf("my_vm_pool_set_compromised(): checking vm_state\n");
+	if (vm_pool->pool[vm_id].vm_state == uncompromised_connected
+			|| vm_pool->pool[vm_id].vm_state == compromised_idle) {
+		printf(
+				"my_vm_pool_set_compromised(): setting state to compromised_connected\n");
 		vm_pool->pool[vm_id].vm_state = compromised_connected;
+		succeed = 1;
+	} else if (vm_pool->pool[vm_id].vm_state == compromised_connected) {
+		printf(
+				"my_vm_pool_set_compromised(): state is already compromised_connected\n");
 		succeed = 1;
 	}
 	pthread_rwlock_unlock(&(vm_pool->pool[vm_id].lock));

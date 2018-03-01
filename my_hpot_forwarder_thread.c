@@ -54,7 +54,7 @@ void* ssh_forwarder(void* arg) {
 		return NULL;
 	} else {
 		printf("getpeername() returned %d, client IP:\n", ret);
-		uint8_t* addr = &(client_sa.sin6_addr);
+		uint8_t* addr = (uint8_t*) &(client_sa.sin6_addr);
 		for (int i = 0; i < 16; i++) {
 			printf("%u ", addr[i]);
 		}
@@ -584,8 +584,8 @@ void* ssh_forwarder(void* arg) {
 						break;
 					}
 
-					size_t i = 0;
-					/*putchar('\n');
+					/*size_t i = 0;
+					 putchar('\n');
 					 for (i = 0; i < len; i++) {
 					 printf("%02x ", data[i]);
 					 }
@@ -701,6 +701,15 @@ void* ssh_forwarder(void* arg) {
 									should_loop = 0;
 									break;
 								}
+								ret = my_vm_pool_set_compromised(args->vm_pool,
+										vm_id);
+								if (ret < 0) {
+									fprintf(stderr,
+											"thread for %d: my_vm_pool_set_compromised() failed\n",
+											args->real_client_fd);
+									should_loop = 0;
+									break;
+								}
 							}
 						} else {
 							printf("Auth succeeded again\n");
@@ -723,8 +732,8 @@ void* ssh_forwarder(void* arg) {
 						break;
 					}
 
-					size_t i = 0;
-					/*putchar('\n');
+					/*size_t i = 0;
+					 putchar('\n');
 					 for (i = 0; i < len; i++) {
 					 printf("%02x ", data[i]);
 					 }
@@ -792,11 +801,11 @@ void* ssh_forwarder(void* arg) {
 		}
 	}
 
-	if (auth_success) {
-		printf("Login succeeded\n");
-	} else {
-		printf("Login failed\n");
-	}
+	/*if (auth_success) {
+	 printf("Login succeeded\n");
+	 } else {
+	 printf("Login failed\n");
+	 }*/
 
 	ret = my_logger_pqsql_update_end_time(logger_pqsql);
 	if (ret < 0) {

@@ -57,7 +57,7 @@ static int my_lxd_api_wait_operation(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -144,7 +144,7 @@ int my_lxd_api_container_exists(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* check response code */
 	if (response_code == 404) {
@@ -291,7 +291,7 @@ int my_lxd_api_create_container(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -401,7 +401,7 @@ int my_lxd_api_snapshot_exists(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* check response code */
 	if (response_code == 404) {
@@ -509,7 +509,7 @@ int my_lxd_api_create_snapshot(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -638,7 +638,7 @@ int my_lxd_api_restore_snapshot(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -760,7 +760,7 @@ int my_lxd_api_delete_snapshot(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -880,7 +880,7 @@ int my_lxd_api_power_container(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -995,7 +995,7 @@ int my_lxd_api_delete_container(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
@@ -1105,7 +1105,7 @@ int my_lxd_api_get_container_ip(struct my_lxd_api* lxd_api,
 	}
 
 	fprintf(stderr, "Response code: %ld\n", response_code);
-	fprintf(stderr, "Data: \n%s\n", mcm->mem);
+	/*fprintf(stderr, "Data: \n%s\n", mcm->mem);*/
 
 	/* parse JSON */
 	json_error_t jerror;
