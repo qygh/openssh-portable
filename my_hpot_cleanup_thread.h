@@ -8,6 +8,7 @@
 #ifndef MY_HPOT_CLEANUP_THREAD_H_
 #define MY_HPOT_CLEANUP_THREAD_H_
 
+#include "my_vm_pool.h"
 #include "my_hpot_config.h"
 
 struct ssh_cleanup_thread_arg {

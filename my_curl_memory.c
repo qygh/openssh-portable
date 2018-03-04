@@ -20,8 +20,8 @@ struct my_curl_memory* my_curl_memory_new() {
 
 size_t my_curl_memory_write(void* data, size_t size, size_t nmemb,
 		struct my_curl_memory* mcm) {
-	printf("my_curl_memory_write(%p, %zu, %zu, %p) called\n", data, size, nmemb,
-			mcm);
+	/*printf("my_curl_memory_write(%p, %zu, %zu, %p) called\n", data, size, nmemb,
+	 mcm);*/
 
 	size_t datalen = size * nmemb;
 

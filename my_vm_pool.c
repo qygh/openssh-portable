@@ -401,7 +401,7 @@ int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, uint32_t vm_id,
 }
 
 int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
-		int delete_iptables_snat) {
+		int delete_iptables_snat, int take_snapshot) {
 	if (vm_pool == NULL) {
 		return -1;
 	}
@@ -492,14 +492,18 @@ int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
 					}
 				}
 
-				int ret = my_lxd_api_create_snapshot(vm_pool->lxd_api, vm_name,
-						snapshot_name);
-				if (ret < 0) {
-					error = 1;
-					sdsfree(snapshot_name);
-					sdsfree(vm_name);
-					pthread_rwlock_unlock(&(vm_pool->pool[i].lock));
-					continue;
+				int ret;
+
+				if (take_snapshot) {
+					ret = my_lxd_api_create_snapshot(vm_pool->lxd_api, vm_name,
+							snapshot_name);
+					if (ret < 0) {
+						error = 1;
+						sdsfree(snapshot_name);
+						sdsfree(vm_name);
+						pthread_rwlock_unlock(&(vm_pool->pool[i].lock));
+						continue;
+					}
 				}
 
 				ret = my_lxd_api_restore_snapshot(vm_pool->lxd_api, vm_name,

@@ -377,6 +377,24 @@ struct my_hpot_config* my_hpot_config_new(const char* config_file_path) {
 	}
 
 	{
+		json_t* j_status = json_object_get(j_root, "vm_snapshot_enabled");
+		if (j_status == NULL) {
+			mhc->vm_snapshot_enabled = 1;
+		} else {
+			if (!json_is_boolean(j_status)) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'vm_snapshot_enabled' is not boolean\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			mhc->vm_snapshot_enabled = json_boolean_value(j_status);
+		}
+	}
+
+	{
 		json_t* j_status = json_object_get(j_root, "vm_ssh_port");
 		if (j_status == NULL) {
 			fprintf(stderr,

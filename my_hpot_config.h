@@ -26,6 +26,7 @@ struct my_hpot_config {
 	char* vm_base_snapshot_name;
 	char* vm_nic_name;
 	char* vm_name_prefix;
+	int vm_snapshot_enabled;
 	uint16_t vm_ssh_port;
 	time_t vm_idle_timeout;
 

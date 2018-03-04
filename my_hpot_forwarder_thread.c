@@ -11,6 +11,10 @@ static int verify_host_key(struct sshkey* sshkey, struct ssh* ssh) {
 	return 0;
 }
 
+static void insert_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]);
+
+static void delete_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]);
+
 void print_ssh_message_type(unsigned char type);
 
 void* ssh_forwarder(void* arg) {
@@ -164,61 +168,7 @@ void* ssh_forwarder(void* arg) {
 
 	/* SNAT source IP */
 	if (args->hpot_config->iptables_snat_enabled) {
-		char src_ip[INET6_ADDRSTRLEN] = { 0 };
-		char dst_ip[INET6_ADDRSTRLEN] = { 0 };
-		if (is_ip_ipv6(client_ip)) {
-			const char* ret = inet_ntop(AF_INET6, client_ip, src_ip,
-					sizeof(src_ip));
-			const char* ret2 = inet_ntop(AF_INET6, vm_ip, dst_ip,
-					sizeof(dst_ip));
-			if (ret != NULL && ret2 != NULL) {
-				char command[1024] = { 0 };
-				snprintf(command, sizeof(command),
-						"ip6tables -t nat -C POSTROUTING -d %s -j SNAT --to %s",
-						dst_ip, src_ip);
-				int ret3 = system(command);
-				fprintf(stderr, "system(%s) returned %d\n", command, ret3);
-				if (ret3 != 0) {
-					/* rule does not exist */
-					char command2[1024] = { 0 };
-					snprintf(command2, sizeof(command2),
-							"ip6tables -t nat -I POSTROUTING -d %s -j SNAT --to %s",
-							dst_ip, src_ip);
-					int ret4 = system(command2);
-					if (ret4 != 0) {
-						fprintf(stderr,
-								"system(%s) returned %d, failed to add ip6tables rule\n",
-								command2, ret4);
-					}
-				}
-			}
-		} else {
-			const char* ret = inet_ntop(AF_INET, client_ip + 12, src_ip,
-					sizeof(src_ip));
-			const char* ret2 = inet_ntop(AF_INET, vm_ip + 12, dst_ip,
-					sizeof(dst_ip));
-			if (ret != NULL && ret2 != NULL) {
-				char command[1024] = { 0 };
-				snprintf(command, sizeof(command),
-						"iptables -t nat -C POSTROUTING -d %s -j SNAT --to %s",
-						dst_ip, src_ip);
-				int ret3 = system(command);
-				fprintf(stderr, "system(%s) returned %d\n", command, ret3);
-				if (ret3 != 0) {
-					/* rule does not exist */
-					char command2[1024] = { 0 };
-					snprintf(command2, sizeof(command2),
-							"iptables -t nat -I POSTROUTING -d %s -j SNAT --to %s",
-							dst_ip, src_ip);
-					int ret4 = system(command2);
-					if (ret4 != 0) {
-						fprintf(stderr,
-								"system(%s) returned %d, failed to add iptables rule\n",
-								command2, ret4);
-					}
-				}
-			}
-		}
+		insert_iptables_snat_rule(client_ip, vm_ip);
 	}
 
 	/* connect to VM */
@@ -235,6 +185,9 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	} else {
 		printf("connect() returned %d\n", ret);
@@ -253,6 +206,9 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	}
 
@@ -296,6 +252,9 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	}
 
@@ -314,10 +273,13 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	}
 
-	printf("AAAA\n");
+	//printf("AAAA\n");
 
 	/* initialise SSH private key */
 	sshkey_1 = key_load_private(args->hpot_config->server_key1_path, "", NULL);
@@ -334,12 +296,15 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	} else {
 		printf("key_load_private() returned %p\n", sshkey_1);
 	}
 
-	printf("BBBB\n");
+	//printf("BBBB\n");
 
 	/* add SSH private key to SSH object */
 	ret = ssh_add_hostkey(ssh_s, sshkey_1);
@@ -357,12 +322,15 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	} else {
 		printf("ssh_add_hostkey() returned %d\n", ret);
 	}
 
-	printf("CCCC\n");
+	//printf("CCCC\n");
 
 	if (args->hpot_config->server_key2_enabled) {
 		sshkey_2 = key_load_private(args->hpot_config->server_key2_path, "",
@@ -381,6 +349,9 @@ void* ssh_forwarder(void* arg) {
 			close(args->real_client_fd);
 			shutdown(real_server_fd, SHUT_RDWR);
 			close(real_server_fd);
+			if (args->hpot_config->iptables_snat_enabled) {
+				delete_iptables_snat_rule(client_ip, vm_ip);
+			}
 			return NULL;
 		} else {
 			printf("key_load_private() returned %p\n", sshkey_2);
@@ -403,13 +374,16 @@ void* ssh_forwarder(void* arg) {
 			close(args->real_client_fd);
 			shutdown(real_server_fd, SHUT_RDWR);
 			close(real_server_fd);
+			if (args->hpot_config->iptables_snat_enabled) {
+				delete_iptables_snat_rule(client_ip, vm_ip);
+			}
 			return NULL;
 		} else {
 			printf("ssh_add_hostkey() returned %d\n", ret);
 		}
 	}
 
-	printf("DDDD\n");
+	//printf("DDDD\n");
 
 	/* initialise SSH object */
 	ret = ssh_init(&ssh_c, 0, NULL);
@@ -430,12 +404,15 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	} else {
 		printf("ssh_init() returned %d, ssh: %p\n", ret, ssh_c);
 	}
 
-	printf("EEEE\n");
+	//printf("EEEE\n");
 
 	/* set SSH host key verification function */
 	ret = ssh_set_verify_host_key_callback(ssh_c, verify_host_key);
@@ -458,10 +435,13 @@ void* ssh_forwarder(void* arg) {
 		close(args->real_client_fd);
 		shutdown(real_server_fd, SHUT_RDWR);
 		close(real_server_fd);
+		if (args->hpot_config->iptables_snat_enabled) {
+			delete_iptables_snat_rule(client_ip, vm_ip);
+		}
 		return NULL;
 	}
 
-	printf("FFFF\n");
+	//printf("FFFF\n");
 
 	/* poll the two sockets */
 	struct pollfd ufds[2];
@@ -480,7 +460,7 @@ void* ssh_forwarder(void* arg) {
 		ssh_flush(ssh_c, ufds[1].fd);
 	}
 
-	printf("GGGG\n");
+	/*printf("GGGG\n");*/
 
 	int auth_success = 0;
 	while (1) {
@@ -801,11 +781,11 @@ void* ssh_forwarder(void* arg) {
 		}
 	}
 
-	/*if (auth_success) {
-	 printf("Login succeeded\n");
-	 } else {
-	 printf("Login failed\n");
-	 }*/
+	if (auth_success) {
+		printf("Login succeeded\n");
+	} else {
+		printf("Login failed\n");
+	}
 
 	ret = my_logger_pqsql_update_end_time(logger_pqsql);
 	if (ret < 0) {
@@ -836,6 +816,9 @@ void* ssh_forwarder(void* arg) {
 	close(args->real_client_fd);
 	shutdown(real_server_fd, SHUT_RDWR);
 	close(real_server_fd);
+	if (args->hpot_config->iptables_snat_enabled) {
+		delete_iptables_snat_rule(client_ip, vm_ip);
+	}
 
 	printf("thread for %d terminating\n", args->real_client_fd);
 	return NULL;
@@ -1043,4 +1026,108 @@ void print_ssh_message_type(unsigned char type) {
 	}
 
 	printf("message type is %u: %s\n", type, msg_type);
+}
+
+static void insert_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]) {
+	char src_ip[INET6_ADDRSTRLEN] = { 0 };
+	char dst_ip[INET6_ADDRSTRLEN] = { 0 };
+	if (is_ip_ipv6(client_ip)) {
+		const char* ret = inet_ntop(AF_INET6, client_ip, src_ip,
+				sizeof(src_ip));
+		const char* ret2 = inet_ntop(AF_INET6, vm_ip, dst_ip, sizeof(dst_ip));
+		if (ret != NULL && ret2 != NULL) {
+			char command[1024] = { 0 };
+			snprintf(command, sizeof(command),
+					"ip6tables -t nat -C POSTROUTING -d %s -j SNAT --to %s",
+					dst_ip, src_ip);
+			int ret3 = system(command);
+			fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+			if (ret3 != 0) {
+				/* rule does not exist */
+				char command2[1024] = { 0 };
+				snprintf(command2, sizeof(command2),
+						"ip6tables -t nat -I POSTROUTING -d %s -j SNAT --to %s",
+						dst_ip, src_ip);
+				int ret4 = system(command2);
+				if (ret4 != 0) {
+					fprintf(stderr,
+							"system(%s) returned %d, failed to add ip6tables rule\n",
+							command2, ret4);
+				}
+			}
+		}
+	} else {
+		const char* ret = inet_ntop(AF_INET, client_ip + 12, src_ip,
+				sizeof(src_ip));
+		const char* ret2 = inet_ntop(AF_INET, vm_ip + 12, dst_ip,
+				sizeof(dst_ip));
+		if (ret != NULL && ret2 != NULL) {
+			char command[1024] = { 0 };
+			snprintf(command, sizeof(command),
+					"iptables -t nat -C POSTROUTING -d %s -j SNAT --to %s",
+					dst_ip, src_ip);
+			int ret3 = system(command);
+			fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+			if (ret3 != 0) {
+				/* rule does not exist */
+				char command2[1024] = { 0 };
+				snprintf(command2, sizeof(command2),
+						"iptables -t nat -I POSTROUTING -d %s -j SNAT --to %s",
+						dst_ip, src_ip);
+				int ret4 = system(command2);
+				if (ret4 != 0) {
+					fprintf(stderr,
+							"system(%s) returned %d, failed to add iptables rule\n",
+							command2, ret4);
+				}
+			}
+		}
+	}
+}
+
+static void delete_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]) {
+	char src_ip[INET6_ADDRSTRLEN] = { 0 };
+	char dst_ip[INET6_ADDRSTRLEN] = { 0 };
+	if (is_ip_ipv6(client_ip)) {
+		const char* ret = inet_ntop(AF_INET6, client_ip, src_ip,
+				sizeof(src_ip));
+		const char* ret2 = inet_ntop(AF_INET6, vm_ip, dst_ip, sizeof(dst_ip));
+		if (ret != NULL && ret2 != NULL) {
+			char command[1024] = { 0 };
+			snprintf(command, sizeof(command),
+					"ip6tables -t nat -D POSTROUTING -d %s -j SNAT --to %s",
+					dst_ip, src_ip);
+			int ret3 = system(command);
+			fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+			/*while (1) {
+			 loop until no such rule exists
+			 int ret3 = system(command);
+			 fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+			 if (ret3 != 0) {
+			 break;
+			 }
+			 }*/
+		}
+	} else {
+		const char* ret = inet_ntop(AF_INET, client_ip + 12, src_ip,
+				sizeof(src_ip));
+		const char* ret2 = inet_ntop(AF_INET, vm_ip + 12, dst_ip,
+				sizeof(dst_ip));
+		if (ret != NULL && ret2 != NULL) {
+			char command[1024] = { 0 };
+			snprintf(command, sizeof(command),
+					"iptables -t nat -D POSTROUTING -d %s -j SNAT --to %s",
+					dst_ip, src_ip);
+			int ret3 = system(command);
+			fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+			/*while (1) {
+			 loop until no such rule exists
+			 int ret3 = system(command);
+			 fprintf(stderr, "system(%s) returned %d\n", command, ret3);
+			 if (ret3 != 0) {
+			 break;
+			 }
+			 }*/
+		}
+	}
 }

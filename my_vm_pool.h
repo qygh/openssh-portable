@@ -63,7 +63,7 @@ int my_vm_pool_get_vm_ip(struct my_vm_pool* vm_pool, uint32_t vm_id,
 		const char* nic_name, uint8_t vm_ip_addr_out[16]);
 
 int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
-		int delete_iptables_snat);
+		int delete_iptables_snat, int take_snapshot);
 
 int my_vm_pool_set_compromised(struct my_vm_pool* vm_pool, uint32_t vm_id);
 

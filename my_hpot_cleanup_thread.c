@@ -27,7 +27,8 @@ void* hpot_cleanup(void* arg) {
 	while (1) {
 		printf("calling my_vm_pool_process_idle_timeout_vms()\n");
 		int ret = my_vm_pool_process_idle_timeout_vms(args->vm_pool,
-				args->hpot_config->iptables_snat_enabled);
+				args->hpot_config->iptables_snat_enabled,
+				args->hpot_config->vm_snapshot_enabled);
 		if (ret < 0) {
 			fprintf(stderr,
 					"hpot_cleanup(): my_vm_pool_process_idle_timeout_vms() failed\n");
