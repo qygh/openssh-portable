@@ -20,6 +20,7 @@
 #include <poll.h>
 #include <errno.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #include "my_ssh_api.h"
 #include "my_vm_pool.h"

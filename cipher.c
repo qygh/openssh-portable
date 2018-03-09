@@ -245,7 +245,7 @@ cipher_init(struct sshcipher_ctx **ccp, const struct sshcipher *cipher,
 	*ccp = NULL;
 	if ((cc = calloc(sizeof(*cc), 1)) == NULL)
 		return SSH_ERR_ALLOC_FAIL;
-	printf("ALLOCATED %p\n", cc);
+/*printf("ALLOCATED %p\n", cc);*/
 	cc->plaintext = (cipher->flags & CFLAG_NONE) != 0;
 	cc->encrypt = do_encrypt;
 
@@ -422,7 +422,7 @@ cipher_free(struct sshcipher_ctx *cc)
 	}
 #endif
 	explicit_bzero(cc, sizeof(*cc));
-	printf("FREEING %p\n", cc);
+/*printf("FREEING %p\n", cc);*/
 	free(cc);
 }
 

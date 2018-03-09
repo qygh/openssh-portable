@@ -15,6 +15,10 @@ static void insert_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]);
 
 static void delete_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]);
 
+static int rewrite_userauth_password_message(const u_char* data, size_t len,
+		char* new_username, char* new_password, unsigned char* out_buffer,
+		size_t out_buffer_len, size_t* new_data_len);
+
 void print_ssh_message_type(unsigned char type);
 
 void* ssh_forwarder(void* arg) {
@@ -604,7 +608,50 @@ void* ssh_forwarder(void* arg) {
 						}
 					}
 
-					ret = ssh_write(ssh_c, type, data, len);
+					int message_rewritten = 0;
+					{
+						//TODO modify password on the fly
+						size_t i;
+
+						putchar('\n');
+						printf("message type: %u, length: %zu\n", type, len);
+						putchar('\n');
+
+						for (i = 0; i < len; i++) {
+							printf("%02x ", data[i]);
+						}
+						putchar('\n');
+						putchar('\n');
+
+						for (i = 0; i < len; i++) {
+							if (isprint(data[i])) {
+								putchar(data[i]);
+							}
+						}
+						putchar('\n');
+						putchar('\n');
+
+						if (type == 50) {
+							unsigned char new_data[2048] = { 0 };
+							size_t new_len = 0;
+							int ret2 = rewrite_userauth_password_message(data,
+									len, NULL, "123456", new_data,
+									sizeof(new_data), &new_len);
+							printf(
+									"rewrite_userauth_password_message() returned %d\n",
+									ret2);
+							if (ret2 == 0) {
+								message_rewritten = 1;
+								ret = ssh_write(ssh_c, type, new_data, new_len);
+							}
+						}
+					}
+
+					if (message_rewritten) {
+						/* do nothing, since rewritten message has already been sent */
+					} else {
+						ret = ssh_write(ssh_c, type, data, len);
+					}
 					/*printf("ssh_write(ssh_c, %d) returned %zd\n", ufds[1].fd,
 					 ret);*/
 					if (ret < 0) {
@@ -1130,4 +1177,182 @@ static void delete_iptables_snat_rule(uint8_t client_ip[16], uint8_t vm_ip[16]) 
 			 }*/
 		}
 	}
+}
+
+static int rewrite_userauth_password_message(const u_char* data, size_t len,
+		char* new_username, char* new_password, unsigned char* out_buffer,
+		size_t out_buffer_len, size_t* new_data_len) {
+	if (len < 1) {
+		return -1;
+	}
+
+	if (data == NULL) {
+		return -1;
+	}
+
+	uint32_t bytes_read = 0;
+
+	uint32_t user_name_len;
+	if (len < 4) {
+		return -1;
+	}
+	memcpy(&user_name_len, data, 4);
+	bytes_read += 4;
+	user_name_len = ntohl(user_name_len);
+	printf("user_name length: %u\n", user_name_len);
+
+	if (len < bytes_read + user_name_len) {
+		return -1;
+	}
+	printf("user_name: ");
+	for (uint32_t i = 0; i < user_name_len; i++) {
+		putchar(data[i + bytes_read]);
+	}
+	bytes_read += user_name_len;
+	putchar('\n');
+
+	uint32_t service_name_len;
+	if (len < bytes_read + 4) {
+		return -1;
+	}
+	memcpy(&service_name_len, data + bytes_read, 4);
+	bytes_read += 4;
+	service_name_len = ntohl(service_name_len);
+	printf("service_name length: %u\n", service_name_len);
+
+	if (len < bytes_read + service_name_len) {
+		return -1;
+	}
+	printf("service_name: ");
+	for (uint32_t i = 0; i < service_name_len; i++) {
+		putchar(data[i + bytes_read]);
+	}
+	bytes_read += service_name_len;
+	putchar('\n');
+
+	uint32_t method_name_len;
+	if (len < bytes_read + 4) {
+		return -1;
+	}
+	memcpy(&method_name_len, data + bytes_read, 4);
+	bytes_read += 4;
+	method_name_len = ntohl(method_name_len);
+	printf("method_name length: %u\n", method_name_len);
+
+	if (len < bytes_read + method_name_len) {
+		return -1;
+	}
+	printf("method_name: ");
+	for (uint32_t i = 0; i < method_name_len; i++) {
+		putchar(data[i + bytes_read]);
+	}
+	bytes_read += method_name_len;
+	putchar('\n');
+
+	/* check if method name is password */
+	int method_is_password = 0;
+	if (method_name_len == 8) {
+		if (memcmp(data + bytes_read - method_name_len, "password", 8) == 0) {
+			method_is_password = 1;
+		}
+	}
+	printf("method_is_password: %d\n", method_is_password);
+	if (!method_is_password) {
+		return -1;
+	}
+
+	/* check if next byte is 0 */
+	if (len < bytes_read + 1) {
+		return -1;
+	}
+	if (data[bytes_read] != 0) {
+		return -1;
+	}
+	bytes_read += 1;
+
+	/* get password length */
+	uint32_t password_len;
+	if (len < bytes_read + 4) {
+		return -1;
+	}
+	memcpy(&password_len, data + bytes_read, 4);
+	bytes_read += 4;
+	password_len = ntohl(password_len);
+	printf("password length: %u\n", password_len);
+
+	/* do not allow empty password */
+	if (password_len < 1) {
+		return -1;
+	}
+
+	if (len < bytes_read + password_len) {
+		return -1;
+	}
+	printf("password: ");
+	for (uint32_t i = 0; i < password_len; i++) {
+		putchar(data[i + bytes_read]);
+	}
+	bytes_read += password_len;
+	putchar('\n');
+
+	/* compute new message length */
+	uint32_t new_username_len;
+	if (new_username == NULL) {
+		new_username_len = user_name_len;
+	} else {
+		new_username_len = strlen(new_username);
+	}
+	uint32_t new_password_len;
+	if (new_password == NULL) {
+		new_password_len = password_len;
+	} else {
+		new_password_len = strlen(new_password);
+	}
+	size_t new_len = 4 + new_username_len + 4 + service_name_len + 4
+			+ method_name_len + 1 + 4 + new_password_len;
+	if (out_buffer_len < new_len) {
+		return -1;
+	}
+
+	/* generate new message */
+	/* user name */
+	uint32_t new_username_len_n = htonl(new_username_len);
+	memcpy(out_buffer, &new_username_len_n, 4);
+	if (new_username == NULL) {
+		memcpy(out_buffer + 4, data + 4, new_username_len);
+	} else {
+		memcpy(out_buffer + 4, new_username, new_username_len);
+	}
+	/* service name */
+	memcpy(out_buffer + 4 + new_username_len, data + 4 + user_name_len, 4);
+	memcpy(out_buffer + 4 + new_username_len + 4, data + 4 + user_name_len + 4,
+			service_name_len);
+	/* method name */
+	memcpy(out_buffer + 4 + new_username_len + 4 + service_name_len,
+			data + 4 + user_name_len + 4 + service_name_len, 4);
+	memcpy(out_buffer + 4 + new_username_len + 4 + service_name_len + 4,
+			data + 4 + user_name_len + 4 + service_name_len + 4,
+			method_name_len);
+	/* password */
+	out_buffer[4 + new_username_len + 4 + service_name_len + 4 + method_name_len] =
+			0;
+	uint32_t new_password_len_n = htonl(new_password_len);
+	memcpy(
+			out_buffer + 4 + new_username_len + 4 + service_name_len + 4
+					+ method_name_len + 1, &new_password_len_n, 4);
+	if (new_password == NULL) {
+		memcpy(
+				out_buffer + 4 + new_username_len + 4 + service_name_len + 4
+						+ method_name_len + 1 + 4,
+				data + 4 + user_name_len + 4 + service_name_len + 4
+						+ method_name_len + 1 + 4, new_password_len);
+	} else {
+		memcpy(
+				out_buffer + 4 + new_username_len + 4 + service_name_len + 4
+						+ method_name_len + 1 + 4, new_password,
+				new_password_len);
+	}
+	*new_data_len = new_len;
+
+	return 0;
 }
