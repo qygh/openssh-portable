@@ -1,6 +1,6 @@
-Makefile
+#Makefile
 buildpkg.sh
-config.h
+#config.h
 config.h.in
 config.status
 configure
