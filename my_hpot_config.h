@@ -19,6 +19,9 @@ struct my_hpot_config {
 	int server_key2_enabled;
 	char* server_key2_path;
 
+	int server_key3_enabled;
+	char* server_key3_path;
+
 	uint16_t listening_port;
 
 	uint32_t vm_pool_size;
@@ -29,6 +32,10 @@ struct my_hpot_config {
 	int vm_snapshot_enabled;
 	uint16_t vm_ssh_port;
 	time_t vm_idle_timeout;
+
+	int ssh_rewrite_password_enabled;
+	int ssh_rewrite_password_probability_percent;
+	char* ssh_rewrite_password;
 
 	int log_file_enabled;
 	char* log_file_prefix;

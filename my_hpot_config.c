@@ -10,6 +10,7 @@
 static void free_all_config_strings(struct my_hpot_config* mhc) {
 	free(mhc->server_key1_path);
 	free(mhc->server_key2_path);
+	free(mhc->server_key3_path);
 	free(mhc->vm_base_image_name);
 	free(mhc->vm_base_snapshot_name);
 	free(mhc->vm_nic_name);
@@ -29,6 +30,7 @@ struct my_hpot_config* my_hpot_config_new(const char* config_file_path) {
 	}
 	mhc->server_key1_path = NULL;
 	mhc->server_key2_path = NULL;
+	mhc->server_key3_path = NULL;
 	mhc->vm_base_image_name = NULL;
 	mhc->vm_base_snapshot_name = NULL;
 	mhc->vm_nic_name = NULL;
@@ -87,24 +89,19 @@ struct my_hpot_config* my_hpot_config_new(const char* config_file_path) {
 	{
 		json_t* j_status = json_object_get(j_root, "server_key2_enabled");
 		if (j_status == NULL) {
-			fprintf(stderr,
-					"my_hpot_config_new(): failed to get 'server_key2_enabled'\n");
+			mhc->server_key2_enabled = 0;
+		} else {
+			if (!json_is_boolean(j_status)) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'server_key2_enabled' is not boolean\n");
 
-			free_all_config_strings(mhc);
-			json_decref(j_root);
-			free(mhc);
-			return NULL;
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			mhc->server_key2_enabled = json_boolean_value(j_status);
 		}
-		if (!json_is_boolean(j_status)) {
-			fprintf(stderr,
-					"my_hpot_config_new(): 'server_key2_enabled' is not boolean\n");
-
-			free_all_config_strings(mhc);
-			json_decref(j_root);
-			free(mhc);
-			return NULL;
-		}
-		mhc->server_key2_enabled = json_boolean_value(j_status);
 	}
 
 	if (mhc->server_key2_enabled) {
@@ -139,6 +136,65 @@ struct my_hpot_config* my_hpot_config_new(const char* config_file_path) {
 		}
 		mhc->server_key2_path = strdup(str);
 		if (mhc->server_key2_path == NULL) {
+			fprintf(stderr, "my_hpot_config_new(): strdup() failed\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+	}
+
+	{
+		json_t* j_status = json_object_get(j_root, "server_key3_enabled");
+		if (j_status == NULL) {
+			mhc->server_key3_enabled = 0;
+		} else {
+			if (!json_is_boolean(j_status)) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'server_key3_enabled' is not boolean\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			mhc->server_key3_enabled = json_boolean_value(j_status);
+		}
+	}
+
+	if (mhc->server_key3_enabled) {
+		json_t* j_status = json_object_get(j_root, "server_key3_path");
+		if (j_status == NULL) {
+			fprintf(stderr,
+					"my_hpot_config_new(): failed to get 'server_key3_path'\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+		if (!json_is_string(j_status)) {
+			fprintf(stderr,
+					"my_hpot_config_new(): 'server_key3_path' is not string\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+		const char* str = json_string_value(j_status);
+		if (str == NULL) {
+			fprintf(stderr,
+					"my_hpot_config_new(): 'server_key3_path' is null\n");
+
+			free_all_config_strings(mhc);
+			json_decref(j_root);
+			free(mhc);
+			return NULL;
+		}
+		mhc->server_key3_path = strdup(str);
+		if (mhc->server_key3_path == NULL) {
 			fprintf(stderr, "my_hpot_config_new(): strdup() failed\n");
 
 			free_all_config_strings(mhc);
@@ -456,6 +512,96 @@ struct my_hpot_config* my_hpot_config_new(const char* config_file_path) {
 			json_decref(j_root);
 			free(mhc);
 			return NULL;
+		}
+	}
+
+	{
+		json_t* j_status = json_object_get(j_root,
+				"ssh_rewrite_password_enabled");
+		if (j_status == NULL) {
+			mhc->ssh_rewrite_password_enabled = 0;
+		} else {
+			if (!json_is_boolean(j_status)) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'ssh_rewrite_password_enabled' is not boolean\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			mhc->ssh_rewrite_password_enabled = json_boolean_value(j_status);
+		}
+	}
+
+	if (mhc->ssh_rewrite_password_enabled) {
+		json_t* j_status = json_object_get(j_root,
+				"ssh_rewrite_password_probability_percent");
+		if (j_status == NULL) {
+			mhc->ssh_rewrite_password_probability_percent = 100;
+		} else {
+			if (!json_is_integer(j_status)) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'ssh_rewrite_password_probability_percent' is not integer\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			mhc->ssh_rewrite_password_probability_percent = json_integer_value(
+					j_status);
+			if (mhc->ssh_rewrite_password_probability_percent < 0
+					|| mhc->ssh_rewrite_password_probability_percent > 100) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'ssh_rewrite_password_probability_percent' is not between 0 and 100\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+		}
+
+		{
+			json_t* j_status = json_object_get(j_root, "ssh_rewrite_password");
+			if (j_status == NULL) {
+				fprintf(stderr,
+						"my_hpot_config_new(): failed to get 'ssh_rewrite_password'\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			if (!json_is_string(j_status)) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'ssh_rewrite_password' is not string\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			const char* str = json_string_value(j_status);
+			if (str == NULL) {
+				fprintf(stderr,
+						"my_hpot_config_new(): 'ssh_rewrite_password' is null\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
+			mhc->ssh_rewrite_password = strdup(str);
+			if (mhc->ssh_rewrite_password == NULL) {
+				fprintf(stderr, "my_hpot_config_new(): strdup() failed\n");
+
+				free_all_config_strings(mhc);
+				json_decref(j_root);
+				free(mhc);
+				return NULL;
+			}
 		}
 	}
 

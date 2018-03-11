@@ -46,6 +46,8 @@ void* ssh_forwarder(void* arg) {
 
 	struct sshkey* sshkey_2 = NULL;
 
+	struct sshkey* sshkey_3 = NULL;
+
 	struct ssh* ssh_c = NULL;
 
 	/* get client IP */
@@ -88,6 +90,10 @@ void* ssh_forwarder(void* arg) {
 		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
 		return NULL;
+	} else {
+		fprintf(stderr,
+				"thread for %d: my_vm_pool_request() succeeded, vm_id: %u\n",
+				args->real_client_fd, vm_id);
 	}
 
 	uint8_t vm_ip[16] = { 0 };
@@ -283,8 +289,6 @@ void* ssh_forwarder(void* arg) {
 		return NULL;
 	}
 
-	//printf("AAAA\n");
-
 	/* initialise SSH private key */
 	sshkey_1 = key_load_private(args->hpot_config->server_key1_path, "", NULL);
 	if (sshkey_1 == NULL) {
@@ -307,8 +311,6 @@ void* ssh_forwarder(void* arg) {
 	} else {
 		printf("key_load_private() returned %p\n", sshkey_1);
 	}
-
-	//printf("BBBB\n");
 
 	/* add SSH private key to SSH object */
 	ret = ssh_add_hostkey(ssh_s, sshkey_1);
@@ -333,8 +335,6 @@ void* ssh_forwarder(void* arg) {
 	} else {
 		printf("ssh_add_hostkey() returned %d\n", ret);
 	}
-
-	//printf("CCCC\n");
 
 	if (args->hpot_config->server_key2_enabled) {
 		sshkey_2 = key_load_private(args->hpot_config->server_key2_path, "",
@@ -387,7 +387,58 @@ void* ssh_forwarder(void* arg) {
 		}
 	}
 
-	//printf("DDDD\n");
+	if (args->hpot_config->server_key3_enabled) {
+		sshkey_3 = key_load_private(args->hpot_config->server_key3_path, "",
+		NULL);
+		if (sshkey_3 == NULL) {
+			fprintf(stderr, "thread for %d: key_load_private() failed\n",
+					args->real_client_fd);
+			//TODO handle connection with fake SSH server
+
+			sshkey_free(sshkey_2);
+			sshkey_free(sshkey_1);
+			ssh_free(ssh_s);
+			my_logger_pqsql_free(logger_pqsql);
+			my_logger_file_free(logger_file);
+			my_vm_pool_release(args->vm_pool, vm_id);
+			shutdown(args->real_client_fd, SHUT_RDWR);
+			close(args->real_client_fd);
+			shutdown(real_server_fd, SHUT_RDWR);
+			close(real_server_fd);
+			if (args->hpot_config->iptables_snat_enabled) {
+				delete_iptables_snat_rule(client_ip, vm_ip);
+			}
+			return NULL;
+		} else {
+			printf("key_load_private() returned %p\n", sshkey_3);
+		}
+
+		/* add SSH private key to SSH object */
+		ret = ssh_add_hostkey(ssh_s, sshkey_3);
+		if (ret != 0) {
+			fprintf(stderr, "thread for %d: ssh_add_hostkey() failed\n",
+					args->real_client_fd);
+			//TODO handle connection with fake SSH server
+
+			sshkey_free(sshkey_3);
+			sshkey_free(sshkey_2);
+			sshkey_free(sshkey_1);
+			ssh_free(ssh_s);
+			my_logger_pqsql_free(logger_pqsql);
+			my_logger_file_free(logger_file);
+			my_vm_pool_release(args->vm_pool, vm_id);
+			shutdown(args->real_client_fd, SHUT_RDWR);
+			close(args->real_client_fd);
+			shutdown(real_server_fd, SHUT_RDWR);
+			close(real_server_fd);
+			if (args->hpot_config->iptables_snat_enabled) {
+				delete_iptables_snat_rule(client_ip, vm_ip);
+			}
+			return NULL;
+		} else {
+			printf("ssh_add_hostkey() returned %d\n", ret);
+		}
+	}
 
 	/* initialise SSH object */
 	ret = ssh_init(&ssh_c, 0, NULL);
@@ -396,6 +447,9 @@ void* ssh_forwarder(void* arg) {
 				args->real_client_fd);
 		//TODO handle connection with fake SSH server
 
+		if (sshkey_3 != NULL) {
+			sshkey_free(sshkey_3);
+		}
 		if (sshkey_2 != NULL) {
 			sshkey_free(sshkey_2);
 		}
@@ -416,8 +470,6 @@ void* ssh_forwarder(void* arg) {
 		printf("ssh_init() returned %d, ssh: %p\n", ret, ssh_c);
 	}
 
-	//printf("EEEE\n");
-
 	/* set SSH host key verification function */
 	ret = ssh_set_verify_host_key_callback(ssh_c, verify_host_key);
 	if (ret != 0) {
@@ -427,6 +479,9 @@ void* ssh_forwarder(void* arg) {
 		//TODO handle connection with fake SSH server
 
 		ssh_free(ssh_c);
+		if (sshkey_3 != NULL) {
+			sshkey_free(sshkey_3);
+		}
 		if (sshkey_2 != NULL) {
 			sshkey_free(sshkey_2);
 		}
@@ -631,18 +686,51 @@ void* ssh_forwarder(void* arg) {
 						putchar('\n');
 						putchar('\n');
 
-						if (type == 50) {
-							unsigned char new_data[2048] = { 0 };
-							size_t new_len = 0;
-							int ret2 = rewrite_userauth_password_message(data,
-									len, NULL, "123456", new_data,
-									sizeof(new_data), &new_len);
-							printf(
-									"rewrite_userauth_password_message() returned %d\n",
-									ret2);
-							if (ret2 == 0) {
-								message_rewritten = 1;
-								ret = ssh_write(ssh_c, type, new_data, new_len);
+						/* password rewrite */
+						if (type == 50
+								&& args->hpot_config->ssh_rewrite_password_enabled) {
+							int rewrite = 0;
+							{
+								if (args->hpot_config->ssh_rewrite_password_probability_percent
+										<= 0) {
+									rewrite = 0;
+								} else if (args->hpot_config->ssh_rewrite_password_probability_percent
+										>= 100) {
+									rewrite = 1;
+								} else {
+									/* generate a random number between 0 and 100 inclusive */
+									unsigned int num;
+									if (getrandom(&num, sizeof(num), 0)
+											== sizeof(num)) {
+										num = num % 100;
+										printf("num: %d\n", num);
+										if ((unsigned) (args->hpot_config->ssh_rewrite_password_probability_percent)
+												> num) {
+											rewrite = 1;
+										}
+									}
+								}
+
+							}
+
+							if (rewrite) {
+								printf("will rewrite password\n");
+								unsigned char new_data[2048] = { 0 };
+								size_t new_len = 0;
+								int ret2 = rewrite_userauth_password_message(
+										data, len, NULL,
+										args->hpot_config->ssh_rewrite_password,
+										new_data, sizeof(new_data), &new_len);
+								printf(
+										"rewrite_userauth_password_message() returned %d\n",
+										ret2);
+								if (ret2 == 0) {
+									message_rewritten = 1;
+									ret = ssh_write(ssh_c, type, new_data,
+											new_len);
+								}
+							} else {
+								printf("will not rewrite password\n");
 							}
 						}
 					}
@@ -851,6 +939,9 @@ void* ssh_forwarder(void* arg) {
 	/* TODO SSH still causes memory leak */
 
 	ssh_free(ssh_c);
+	if (sshkey_3 != NULL) {
+		sshkey_free(sshkey_3);
+	}
 	if (sshkey_2 != NULL) {
 		sshkey_free(sshkey_2);
 	}
