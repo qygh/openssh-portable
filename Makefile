@@ -171,7 +171,10 @@ my_ssh_test$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYSSHTESTOBJS)
 	
 my_hpot_main$(EXEEXT): libssh.a	$(LIBCOMPAT) $(MYHPOTOBJS)
 	$(LD) -o $@ $(MYHPOTOBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lcurl -ljansson -lpq -pthread $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
-	
+
+my_log_analyser: my_log_analyser.o
+	$(LD) -o $@ my_log_analyser.o $(LDFLAGS) -lpq
+
 my_logger_pqsql_test: my_logger_pqsql.o my_logger_pqsql_test.o
 	$(LD) -o $@ my_logger_pqsql.o my_logger_pqsql_test.o $(LDFLAGS) -lpq
 
