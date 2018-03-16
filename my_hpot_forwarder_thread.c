@@ -864,7 +864,7 @@ void* ssh_forwarder(void* arg) {
 
 					/* write this message to logs */
 					if (args->hpot_config->log_file_enabled) {
-						ret = my_logger_file_write(logger_file, 1, type, len,
+						ret = my_logger_file_write(logger_file, 0, type, len,
 								data);
 						if (ret < 0) {
 							fprintf(stderr,
@@ -876,7 +876,7 @@ void* ssh_forwarder(void* arg) {
 					}
 
 					if (args->hpot_config->log_pqsql_enabled) {
-						ret = my_logger_pqsql_write(logger_pqsql, 1, type, len,
+						ret = my_logger_pqsql_write(logger_pqsql, 0, type, len,
 								data);
 						if (ret < 0) {
 							fprintf(stderr,
