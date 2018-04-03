@@ -38,11 +38,9 @@ static int is_ip_same(uint8_t ip_addr_l[16], uint8_t ip_addr_r[16]) {
 
 struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 		const char* base_image_name, const char* base_snapshot_name,
-		const char* vm_name_prefix, const char* vm_nic_name,
-		time_t idle_timeout) {
+		const char* vm_name_prefix, time_t idle_timeout) {
 	if (pool_size < 1 || base_image_name == NULL || base_snapshot_name == NULL
-			|| vm_name_prefix == NULL || vm_nic_name == NULL
-			|| idle_timeout < 1) {
+			|| vm_name_prefix == NULL || idle_timeout < 1) {
 		return NULL;
 	}
 
@@ -70,18 +68,18 @@ struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 		free(mvp);
 		return NULL;
 	}
-	mvp->vm_nic_name = strdup(vm_nic_name);
-	if (mvp->vm_nic_name == NULL) {
-		free(mvp->vm_name_prefix);
-		free(mvp->base_snapshot_name);
-		free(mvp->base_image_name);
-		free(mvp);
-		return NULL;
-	}
+	/*mvp->vm_nic_name = strdup(vm_nic_name);
+	 if (mvp->vm_nic_name == NULL) {
+	 free(mvp->vm_name_prefix);
+	 free(mvp->base_snapshot_name);
+	 free(mvp->base_image_name);
+	 free(mvp);
+	 return NULL;
+	 }*/
 	mvp->idle_timeout = idle_timeout;
 	mvp->pool = calloc(mvp->pool_size, sizeof(struct my_vm_instance));
 	if (mvp->pool == NULL) {
-		free(mvp->vm_nic_name);
+		//free(mvp->vm_nic_name);
 		free(mvp->vm_name_prefix);
 		free(mvp->base_snapshot_name);
 		free(mvp->base_image_name);
@@ -91,7 +89,7 @@ struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 	mvp->lxd_api = my_lxd_api_new(NULL);
 	if (mvp->lxd_api == NULL) {
 		free(mvp->pool);
-		free(mvp->vm_nic_name);
+		//free(mvp->vm_nic_name);
 		free(mvp->vm_name_prefix);
 		free(mvp->base_snapshot_name);
 		free(mvp->base_image_name);
@@ -201,6 +199,7 @@ int my_vm_pool_request(struct my_vm_pool* vm_pool, uint8_t client_ip_addr[16],
 	}
 
 	int succeed = 0;
+
 	for (uint32_t i = 0; i < vm_pool->pool_size; i++) {
 		/*sds vm_name = sdscatprintf(sdsempty(), "%s-%u", vm_pool->vm_name_prefix,
 		 i);
@@ -211,16 +210,6 @@ int my_vm_pool_request(struct my_vm_pool* vm_pool, uint8_t client_ip_addr[16],
 		pthread_rwlock_wrlock(&(vm_pool->pool[i].lock));
 		switch (vm_pool->pool[i].vm_state) {
 		case invalid: {
-			break;
-		}
-
-		case uncompromised_idle: {
-			vm_pool->pool[i].conn_count = 1;
-			memcpy(vm_pool->pool[i].client_ip_addr, client_ip_addr, 16);
-			vm_pool->pool[i].vm_state = uncompromised_connected;
-			*vm_id_out = vm_pool->pool[i].id;
-
-			succeed = 1;
 			break;
 		}
 
@@ -262,6 +251,43 @@ int my_vm_pool_request(struct my_vm_pool* vm_pool, uint8_t client_ip_addr[16],
 			}
 
 			vm_pool->pool[i].conn_count = 1;
+			*vm_id_out = vm_pool->pool[i].id;
+
+			succeed = 1;
+			break;
+		}
+
+		case reinstalling: {
+			break;
+		}
+
+		default: {
+			break;
+		}
+		}
+		pthread_rwlock_unlock(&(vm_pool->pool[i].lock));
+		//sdsfree(vm_name);
+
+		if (succeed) {
+			break;
+		}
+	}
+
+	if (succeed) {
+		return 0;
+	}
+
+	for (uint32_t i = 0; i < vm_pool->pool_size; i++) {
+		pthread_rwlock_wrlock(&(vm_pool->pool[i].lock));
+		switch (vm_pool->pool[i].vm_state) {
+		case invalid: {
+			break;
+		}
+
+		case uncompromised_idle: {
+			vm_pool->pool[i].conn_count = 1;
+			memcpy(vm_pool->pool[i].client_ip_addr, client_ip_addr, 16);
+			vm_pool->pool[i].vm_state = uncompromised_connected;
 			*vm_id_out = vm_pool->pool[i].id;
 
 			succeed = 1;
@@ -616,7 +642,7 @@ void my_vm_pool_free(struct my_vm_pool* vm_pool, int delete_vm) {
 	free(vm_pool->base_image_name);
 	free(vm_pool->base_snapshot_name);
 	free(vm_pool->vm_name_prefix);
-	free(vm_pool->vm_nic_name);
+	//free(vm_pool->vm_nic_name);
 	free(vm_pool->pool);
 	my_lxd_api_free(vm_pool->lxd_api);
 }

@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
 
 	struct my_vm_pool* vm_pool = my_vm_pool_new(mhc->vm_pool_size,
 			mhc->vm_base_image_name, mhc->vm_base_snapshot_name,
-			mhc->vm_name_prefix, mhc->vm_nic_name, mhc->vm_idle_timeout);
+			mhc->vm_name_prefix, mhc->vm_idle_timeout);
 	if (vm_pool == NULL) {
 		fprintf(stderr, "my_vm_pool_new() failed\n");
 

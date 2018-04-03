@@ -41,7 +41,7 @@ struct my_vm_pool {
 	char* base_image_name;
 	char* base_snapshot_name;
 	char* vm_name_prefix;
-	char* vm_nic_name;
+	//char* vm_nic_name;
 	time_t idle_timeout;
 	struct my_vm_instance* pool;
 	struct my_lxd_api* lxd_api;
@@ -51,8 +51,7 @@ int is_ip_ipv6(uint8_t ip_addr[16]);
 
 struct my_vm_pool* my_vm_pool_new(uint32_t pool_size,
 		const char* base_image_name, const char* base_snapshot_name,
-		const char* vm_name_prefix, const char* vm_nic_name,
-		time_t idle_timeout);
+		const char* vm_name_prefix, time_t idle_timeout);
 
 int my_vm_pool_request(struct my_vm_pool* vm_pool, uint8_t client_ip_addr[16],
 		uint32_t* vm_id_out);
