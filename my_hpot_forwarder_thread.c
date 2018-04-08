@@ -76,8 +76,6 @@ void* ssh_forwarder(void* arg) {
 	}
 
 	/* request a VM from the VM pool */
-	/* TODO error handling when VM is unavailable, fail to get VM IP address or fail to establish TCP connection to VM */
-	/* TODO implement a fake SSH server that never authenticates in error cases above */
 	uint8_t client_ip[16] = { 0 };
 	memcpy(client_ip, &(client_sa.sin6_addr), 16);
 	uint32_t vm_id = 0;
@@ -85,7 +83,6 @@ void* ssh_forwarder(void* arg) {
 	if (ret < 0) {
 		fprintf(stderr, "thread for %d: my_vm_pool_request() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		shutdown(args->real_client_fd, SHUT_RDWR);
 		close(args->real_client_fd);
@@ -102,7 +99,6 @@ void* ssh_forwarder(void* arg) {
 	if (ret < 0) {
 		fprintf(stderr, "thread for %d: my_vm_pool_get_vm_ip() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		my_vm_pool_release(args->vm_pool, vm_id);
 		shutdown(args->real_client_fd, SHUT_RDWR);
@@ -128,7 +124,6 @@ void* ssh_forwarder(void* arg) {
 		if (logger_file == NULL) {
 			fprintf(stderr, "thread for %d: my_logger_file_new() failed\n",
 					args->real_client_fd);
-			//TODO handle connection with fake SSH server
 
 			my_vm_pool_release(args->vm_pool, vm_id);
 			shutdown(args->real_client_fd, SHUT_RDWR);
@@ -145,7 +140,6 @@ void* ssh_forwarder(void* arg) {
 		if (logger_pqsql == NULL) {
 			fprintf(stderr, "thread for %d: my_logger_pqsql_new() failed\n",
 					args->real_client_fd);
-			//TODO handle connection with fake SSH server
 
 			my_logger_file_free(logger_file);
 			my_vm_pool_release(args->vm_pool, vm_id);
@@ -164,7 +158,6 @@ void* ssh_forwarder(void* arg) {
 	if (real_server_fd < 0) {
 		fprintf(stderr, "thread for %d: socket() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		my_logger_pqsql_free(logger_pqsql);
 		my_logger_file_free(logger_file);
@@ -186,7 +179,6 @@ void* ssh_forwarder(void* arg) {
 	if (ret < 0) {
 		fprintf(stderr, "thread for %d: connect() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		my_logger_pqsql_free(logger_pqsql);
 		my_logger_file_free(logger_file);
@@ -207,7 +199,6 @@ void* ssh_forwarder(void* arg) {
 	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
 		fprintf(stderr, "thread for %d: signal() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		my_logger_pqsql_free(logger_pqsql);
 		my_logger_file_free(logger_file);
@@ -253,7 +244,6 @@ void* ssh_forwarder(void* arg) {
 			|| fcntl(real_server_fd, F_SETFL, O_NONBLOCK) < 0) {
 		fprintf(stderr, "thread for %d: fcntl() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		my_logger_pqsql_free(logger_pqsql);
 		my_logger_file_free(logger_file);
@@ -274,7 +264,6 @@ void* ssh_forwarder(void* arg) {
 	if (ret != 0) {
 		fprintf(stderr, "thread for %d: ssh_init() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		my_logger_pqsql_free(logger_pqsql);
 		my_logger_file_free(logger_file);
@@ -294,7 +283,6 @@ void* ssh_forwarder(void* arg) {
 	if (sshkey_1 == NULL) {
 		fprintf(stderr, "thread for %d: key_load_private() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		ssh_free(ssh_s);
 		my_logger_pqsql_free(logger_pqsql);
@@ -317,7 +305,6 @@ void* ssh_forwarder(void* arg) {
 	if (ret != 0) {
 		fprintf(stderr, "thread for %d: ssh_add_hostkey() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		sshkey_free(sshkey_1);
 		ssh_free(ssh_s);
@@ -342,7 +329,6 @@ void* ssh_forwarder(void* arg) {
 		if (sshkey_2 == NULL) {
 			fprintf(stderr, "thread for %d: key_load_private() failed\n",
 					args->real_client_fd);
-			//TODO handle connection with fake SSH server
 
 			sshkey_free(sshkey_1);
 			ssh_free(ssh_s);
@@ -366,7 +352,6 @@ void* ssh_forwarder(void* arg) {
 		if (ret != 0) {
 			fprintf(stderr, "thread for %d: ssh_add_hostkey() failed\n",
 					args->real_client_fd);
-			//TODO handle connection with fake SSH server
 
 			sshkey_free(sshkey_2);
 			sshkey_free(sshkey_1);
@@ -393,7 +378,6 @@ void* ssh_forwarder(void* arg) {
 		if (sshkey_3 == NULL) {
 			fprintf(stderr, "thread for %d: key_load_private() failed\n",
 					args->real_client_fd);
-			//TODO handle connection with fake SSH server
 
 			sshkey_free(sshkey_2);
 			sshkey_free(sshkey_1);
@@ -418,7 +402,6 @@ void* ssh_forwarder(void* arg) {
 		if (ret != 0) {
 			fprintf(stderr, "thread for %d: ssh_add_hostkey() failed\n",
 					args->real_client_fd);
-			//TODO handle connection with fake SSH server
 
 			sshkey_free(sshkey_3);
 			sshkey_free(sshkey_2);
@@ -445,7 +428,6 @@ void* ssh_forwarder(void* arg) {
 	if (ret != 0) {
 		fprintf(stderr, "thread for %d: ssh_init() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		if (sshkey_3 != NULL) {
 			sshkey_free(sshkey_3);
@@ -476,7 +458,6 @@ void* ssh_forwarder(void* arg) {
 		fprintf(stderr,
 				"thread for %d: ssh_set_verify_host_key_callback() failed\n",
 				args->real_client_fd);
-		//TODO handle connection with fake SSH server
 
 		ssh_free(ssh_c);
 		if (sshkey_3 != NULL) {
@@ -500,8 +481,6 @@ void* ssh_forwarder(void* arg) {
 		return NULL;
 	}
 
-	//printf("FFFF\n");
-
 	/* poll the two sockets */
 	struct pollfd ufds[2];
 	ufds[0].fd = args->real_client_fd;
@@ -518,8 +497,6 @@ void* ssh_forwarder(void* arg) {
 		ssh_read(ssh_c, &type, &data, &len);
 		ssh_flush(ssh_c, ufds[1].fd);
 	}
-
-	/*printf("GGGG\n");*/
 
 	int auth_success = 0;
 	while (1) {
@@ -665,26 +642,25 @@ void* ssh_forwarder(void* arg) {
 
 					int message_rewritten = 0;
 					{
-						//TODO modify password on the fly
 						size_t i;
 
-						putchar('\n');
-						printf("message type: %u, length: %zu\n", type, len);
-						putchar('\n');
+						/*putchar('\n');
+						 printf("message type: %u, length: %zu\n", type, len);
+						 putchar('\n');
 
-						for (i = 0; i < len; i++) {
-							printf("%02x ", data[i]);
-						}
-						putchar('\n');
-						putchar('\n');
+						 for (i = 0; i < len; i++) {
+						 printf("%02x ", data[i]);
+						 }
+						 putchar('\n');
+						 putchar('\n');
 
-						for (i = 0; i < len; i++) {
-							if (isprint(data[i])) {
-								putchar(data[i]);
-							}
-						}
-						putchar('\n');
-						putchar('\n');
+						 for (i = 0; i < len; i++) {
+						 if (isprint(data[i])) {
+						 putchar(data[i]);
+						 }
+						 }
+						 putchar('\n');
+						 putchar('\n');*/
 
 						/* password rewrite */
 						if (type == 50
@@ -700,10 +676,10 @@ void* ssh_forwarder(void* arg) {
 								} else {
 									/* generate a random number between 0 and 100 inclusive */
 									unsigned int num;
-									if (getrandom(&num, sizeof(num), 0)
-											== sizeof(num)) {
+									if (syscall(SYS_getrandom, &num,
+											sizeof(num), 0) == sizeof(num)) {
 										num = num % 100;
-										printf("num: %d\n", num);
+										/*printf("num: %d\n", num);*/
 										if ((unsigned) (args->hpot_config->ssh_rewrite_password_probability_percent)
 												> num) {
 											rewrite = 1;
@@ -805,7 +781,8 @@ void* ssh_forwarder(void* arg) {
 					if (type == 52) {
 						if (auth_success != 1) {
 							auth_success = 1;
-							printf("Auth succeeded first time\n");
+							printf(
+									"authentication succeeded for the first time\n");
 							if (args->hpot_config->log_pqsql_enabled) {
 								ret = my_logger_pqsql_set_login_success(
 										logger_pqsql);
@@ -827,7 +804,7 @@ void* ssh_forwarder(void* arg) {
 								}
 							}
 						} else {
-							printf("Auth succeeded again\n");
+							printf("authentication succeeded again\n");
 						}
 					} else if (type == 0) {
 						/*printf("\n\nSSH_MSG_NONE\n\n");*/
@@ -917,9 +894,9 @@ void* ssh_forwarder(void* arg) {
 	}
 
 	if (auth_success) {
-		printf("Login succeeded\n");
+		printf("login succeeded in this session\n");
 	} else {
-		printf("Login failed\n");
+		printf("login failed in this session\n");
 	}
 
 	ret = my_logger_pqsql_update_end_time(logger_pqsql);
@@ -935,8 +912,6 @@ void* ssh_forwarder(void* arg) {
 		fprintf(stderr, "thread for %d: my_vm_pool_release() failed\n",
 				args->real_client_fd);
 	}
-
-	/* TODO SSH still causes memory leak */
 
 	ssh_free(ssh_c);
 	if (sshkey_3 != NULL) {
@@ -958,7 +933,8 @@ void* ssh_forwarder(void* arg) {
 		delete_iptables_snat_rule(client_ip, vm_ip);
 	}
 
-	printf("thread for %d terminating\n", args->real_client_fd);
+	printf("thread for %d terminating, vm_id: %d\n", args->real_client_fd,
+			vm_id);
 	return NULL;
 }
 

@@ -7,15 +7,17 @@
 
 #ifndef MY_HPOT_FORWARDER_THREAD_H_
 #define MY_HPOT_FORWARDER_THREAD_H_
+#define _GNU_SOURCE
 
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <linux/random.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/random.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <poll.h>
