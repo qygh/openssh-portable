@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	struct my_hpot_config* mhc = my_hpot_config_new(argv[2]);
+	struct my_hpot_config* mhc = my_hpot_config_new(argv[1]);
 	if (mhc == NULL) {
 		fprintf(stderr, "my_hpot_config_new() failed\n");
 		return 1;
