@@ -5,7 +5,7 @@
 	"server_key3_enabled":true,
 	"server_key3_path":"ssh_host_ed25519_key",
 	"listening_port":22,
-	"vm_pool_size":5,
+	"vm_pool_size":3,
 	"vm_base_image_name":"my_image",
 	"vm_base_snapshot_name":"base_snapshot",
 	"vm_nic_name":"eth0",
