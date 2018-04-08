@@ -18,7 +18,7 @@ int main(int argc, char* argv[]) {
 		argv0 = " ";
 	}
 
-	if (argc < 3) {
+	if (argc < 2) {
 		printf("Usage: %s <configuration file>\n", argv0);
 		return 1;
 	}
