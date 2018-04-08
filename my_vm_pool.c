@@ -439,9 +439,9 @@ int my_vm_pool_process_idle_timeout_vms(struct my_vm_pool* vm_pool,
 		//printf("my_vm_pool_process_idle_timeout_vms(): at index %u\n", i);
 		pthread_rwlock_wrlock(&(vm_pool->pool[i].lock));
 		if (vm_pool->pool[i].vm_state == compromised_idle) {
-			printf(
-					"my_vm_pool_process_idle_timeout_vms(): compromised_idle at index %u\n",
-					i);
+			/*printf(
+			 "my_vm_pool_process_idle_timeout_vms(): compromised_idle at index %u\n",
+			 i);*/
 			if (call_time - vm_pool->pool[i].last_disconn
 					> vm_pool->idle_timeout) {
 				printf(
